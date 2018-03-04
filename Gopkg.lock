@@ -71,6 +71,12 @@
   revision = "6add9cd6ad42d389d6ead1dde60b4ad71e46fd74"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/Cimpress-MCP/go-jwks-api-auth"
+  packages = ["."]
+  revision = "41103e412e7a92e81a0e7ca071b1ca977a9d7d60"
+
+[[projects]]
   name = "github.com/JamesClonk/vultr"
   packages = ["lib"]
   revision = "2fd0705ce648e602e6c9c57329a174270a4f6688"
@@ -185,6 +191,12 @@
   name = "github.com/armon/go-proxyproto"
   packages = ["."]
   revision = "48572f11356f1843b694f21a290d4f1006bc5e47"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/auth0/go-jwt-middleware"
+  packages = ["."]
+  revision = "5493cabe49f7bfa6e2ec444a09d334d90cd4e2bd"
 
 [[projects]]
   name = "github.com/aws/aws-sdk-go"

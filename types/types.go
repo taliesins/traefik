@@ -392,6 +392,7 @@ type Auth struct {
 	Digest      *Digest  `json:"digest,omitempty" export:"true"`
 	Forward     *Forward `json:"forward,omitempty" export:"true"`
 	HeaderField string   `json:"headerField,omitempty" export:"true"`
+	Jwt         *Jwt     `export:"true"`
 }
 
 // Users authentication users
@@ -417,6 +418,21 @@ type Forward struct {
 	TLS                 *ClientTLS `description:"Enable TLS support" json:"tls,omitempty" export:"true"`
 	TrustForwardHeader  bool       `description:"Trust X-Forwarded-* headers" json:"trustForwardHeader,omitempty" export:"true"`
 	AuthResponseHeaders []string   `description:"Headers to be forwarded from auth response" json:"authResponseHeaders,omitempty"`
+}
+
+// Jwt authentication
+type Jwt struct {
+	HS256 *HS256 `export:"true"`
+	RS256 *RS256 `export:"true"`
+}
+
+type HS256 struct {
+	ClientSecret string `description:"Client secret for HS256" export:"true"`
+}
+
+type RS256 struct {
+	JwksTargetIssuer   string `description:"Jwks target issuer for RS256" export:"true"`
+	JwksTargetAudience string `description:"Jwks target audience for RS256" export:"true"`
 }
 
 // CanonicalDomain returns a lower case domain with trim space

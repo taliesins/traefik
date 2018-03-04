@@ -264,3 +264,11 @@
 [[constraint]]
   name = "gopkg.in/DataDog/dd-trace-go.v1"
   version = "1.0.0"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/Cimpress-MCP/go-jwks-api-auth"
+
+[[constraint]]
+  branch = "master"
+  name = "github.com/auth0/go-jwt-middleware"
