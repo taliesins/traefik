@@ -422,17 +422,14 @@ type Forward struct {
 
 // Jwt authentication
 type Jwt struct {
-	HS256 *HS256 `export:"true"`
-	RS256 *RS256 `export:"true"`
-}
+	Audience string `export:"true"`
+	Issuer   string `export:"true"`
 
-type HS256 struct {
-	ClientSecret string `description:"Client secret for HS256" export:"true"`
-}
+	JwksAddress string `description:"Jwks uri for tokens that are signed with jwks certs" export:"true"`
 
-type RS256 struct {
-	JwksTargetIssuer   string `description:"Jwks target issuer for RS256" export:"true"`
-	JwksTargetAudience string `description:"Jwks target audience for RS256" export:"true"`
+	ClientSecret string `description:"Client secret for HS256, HS384, HS512" export:"true"`
+
+	CertFile string `description:"Cert file path to use for validating tokens that have been signed with private key" export:"true"`
 }
 
 // CanonicalDomain returns a lower case domain with trim space

@@ -322,6 +322,40 @@ Users can be specified directly in the TOML file, or indirectly by referencing a
   users = ["test:traefik:a2688e031edb4be6a3797f3882655c05", "test2:traefik:518845800f9e2bfb1f1f740ec24f074e"]
   usersFile = "/path/to/.htdigest"
 ```
+### Jwt Authentication
+
+This configuration will validate tokens issued by an STS with jwks support.
+
+```toml
+[entryPoints]
+  [entryPoints.http]
+    # ...
+    # To enable jwt auth with jwks signing on an entrypoint
+    [entryPoints.http.auth.jwt]
+    Issuer = "https://login.microsoftonline.com/fabrikamb2c.onmicrosoft.com"
+```
+
+This configuration will validate tokens issued by an STS with a private key we have the public key for.
+
+```toml
+[entryPoints]
+  [entryPoints.http]
+    # ...
+    # To enable jwt auth with HS on an entrypoint
+    [entryPoints.http.auth.jwt]
+    CertFile = "integration/fixtures/https/snitest.org.cert"
+```
+
+This configuration will validate HS tokens issued by an STS with a common shared secret.
+
+```toml
+[entryPoints]
+  [entryPoints.http]
+    # ...
+    # To enable jwt auth with HS on an entrypoint
+    [entryPoints.http.auth.jwt]
+    clientSecret = "password"
+```
 
 Optionally, you can!
 
