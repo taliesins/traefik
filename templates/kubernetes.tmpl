@@ -88,6 +88,10 @@
 
     {{end}}
 
+    jwtIssuer = "{{ $frontend.JwtIssuer }}"
+    jwtAudience = "{{ $frontend.JwtAudience }}"
+    jwtJwksAddress = "{{ $frontend.JwtClientJwksAddress }}"
+    jwtClientSecret = "{{ $frontend.JwtClientSecret }}"
     {{if $frontend.WhiteList }}
     [frontends."{{ $frontendName }}".whiteList]
       sourceRange = [{{range $frontend.WhiteList.SourceRange }}

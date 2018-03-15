@@ -1070,6 +1070,34 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtClientSecret, "mySecret"),
+			iRules(
+				iRule(
+					iHost("jwt-shared-secret"),
+					iPaths(onePath(iPath("/shared-secret"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iRules(
+				iRule(
+					iHost("jwt-discovered-jwks"),
+					iPaths(onePath(iPath("/discovered-jwks"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthJwtJwksAddress, "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys"),
+			iRules(
+				iRule(
+					iHost("jwt-explicit-jwks"),
+					iPaths(onePath(iPath("/explicit-jwks"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
 			iAnnotation(annotationKubernetesIngressClass, traefikDefaultRealm+"-other"),
 			iRules(
 				iRule(
@@ -1345,6 +1373,24 @@ rateset:
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
+			backend("jwt-shared-secret/shared-secret",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
+			backend("jwt-discovered-jwks/discovered-jwks",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
+			backend("jwt-explicit-jwks/explicit-jwks",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
 			backend("redirect/https",
 				servers(
 					server("http://example.com", weight(1)),
@@ -1457,6 +1503,27 @@ rateset:
 				routes(
 					route("/auth", "PathPrefix:/auth"),
 					route("basic", "Host:basic")),
+			),
+			frontend("jwt-shared-secret/shared-secret",
+				passHostHeader(),
+				jwtAuth("", "", "", "myUser:myEncodedPW"),
+				routes(
+					route("/shared-secret", "PathPrefix:/shared-secret"),
+					route("jwt-shared-secret", "Host:jwt-shared-secret")),
+			),
+			frontend("jwt-discovered-jwks/discovered-jwks",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", ""),
+				routes(
+					route("/discovered-jwks", "PathPrefix:/discovered-jwks"),
+					route("jwt-discovered-jwks", "Host:jwt-discovered-jwks")),
+			),
+			frontend("jwt-explicit-jwks/explicit-jwks",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", ""),
+				routes(
+					route("/explicit-jwks", "PathPrefix:/explicit-jwks"),
+					route("jwt-explicit-jwks", "Host:jwt-explicit-jwks")),
 			),
 			frontend("redirect/https",
 				passHostHeader(),
@@ -2557,6 +2624,70 @@ func TestLoadIngressesForwardAuthWithTLSSecretFailures(t *testing.T) {
 			assert.Equal(t, expected, actual)
 		})
 
+	}
+}
+
+func TestJwtSharedSecretInTemplate(t *testing.T) {
+	ingresses := []*extensionsv1beta1.Ingress{
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtClientSecret, "mySecret"),
+			iRules(
+				iRule(
+					iHost("jwt-shared-secret"),
+					iPaths(onePath(iPath("/shared-secret"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+	}
+
+	services := []*corev1.Service{
+		buildService(
+			sName("service1"),
+			sNamespace("testing"),
+			sUID("1"),
+			sSpec(
+				clusterIP("10.0.0.1"),
+				sType("ExternalName"),
+				sExternalName("example.com"),
+				sPorts(sPort(80, "http"))),
+		),
+	}
+
+	secrets := []*corev1.Secret{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "mySecret",
+			UID:       "1",
+			Namespace: "testing",
+		},
+		Data: map[string][]byte{
+			"mySecret": []byte("mySecretIsBob"),
+		},
+	}}
+
+	var endpoints []*corev1.Endpoints
+	watchChan := make(chan interface{})
+	client := clientMock{
+		ingresses: ingresses,
+		services:  services,
+		secrets:   secrets,
+		endpoints: endpoints,
+		watchChan: watchChan,
+	}
+	provider := Provider{}
+
+	actual, err := provider.loadIngresses(client)
+	require.NoError(t, err, "error loading ingresses")
+	got := actual.Frontends["jwt-shared-secret/shared-secret"].JwtClientSecret
+	if got != "mySecretIsBob" {
+		t.Fatalf("unexpected jwt client secret from ingress: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
+	}
+	actual.Frontends["jwt-shared-secret/shared-secret"].JwtAudience = "Audience"
+	actual = provider.loadConfig(*actual)
+
+	require.NotNil(t, actual)
+	got = actual.Frontends["jwt-shared-secret/shared-secret"].JwtClientSecret
+	if got != "mySecretIsBob" {
+		t.Fatalf("unexpected jwt client secret from loadConfig: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
 	}
 }
 

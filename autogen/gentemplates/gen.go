@@ -22,7 +22,6 @@ import (
 	"strings"
 	"time"
 )
-
 type asset struct {
 	bytes []byte
 	info  os.FileInfo
@@ -901,6 +900,11 @@ var _templatesKubernetesTmpl = []byte(`[backends]
       {{end}}
 
     {{end}}
+
+    jwtIssuer = "{{ $frontend.JwtIssuer }}"
+    jwtAudience = "{{ $frontend.JwtAudience }}"
+    jwtJwksAddress = "{{ $frontend.JwtClientJwksAddress }}"
+    jwtClientSecret = "{{ $frontend.JwtClientSecret }}"
 
     {{if $frontend.WhiteList }}
     [frontends."{{ $frontendName }}".whiteList]
@@ -2125,7 +2129,6 @@ type bintree struct {
 	Func     func() (*asset, error)
 	Children map[string]*bintree
 }
-
 var _bintree = &bintree{nil, map[string]*bintree{
 	"templates": {nil, map[string]*bintree{
 		"consul_catalog.tmpl": {templatesConsul_catalogTmpl, map[string]*bintree{}},
@@ -2187,3 +2190,4 @@ func _filePath(dir, name string) string {
 	cannonicalName := strings.Replace(name, "\\", "/", -1)
 	return filepath.Join(append([]string{dir}, strings.Split(cannonicalName, "/")...)...)
 }
+

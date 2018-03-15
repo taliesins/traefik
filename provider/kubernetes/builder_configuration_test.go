@@ -257,6 +257,14 @@ func fwdAuthTLS(cert, key string, insecure bool) func(*types.Forward) {
 	}
 }
 
+func jwtAuth(jwtIssuer, jwtAudience, jwtClientJwksAddress, jwtClientSecret string) func(*types.Frontend) {
+	return func(f *types.Frontend) {
+		f.JwtIssuer = jwtIssuer
+		f.JwtAudience = jwtAudience
+		f.JwtClientJwksAddress = jwtClientJwksAddress
+		f.JwtClientSecret = jwtClientSecret
+	}
+}
 func whiteList(useXFF bool, ranges ...string) func(*types.Frontend) {
 	return func(f *types.Frontend) {
 		if f.WhiteList == nil {

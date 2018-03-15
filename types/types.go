@@ -183,6 +183,10 @@ type Frontend struct {
 	PassHostHeader       bool                  `json:"passHostHeader,omitempty"`
 	PassTLSCert          bool                  `json:"passTLSCert,omitempty"`
 	Priority             int                   `json:"priority"`
+	JwtIssuer            string                `json:"jwtIssuer,omitempty"`
+	JwtAudience          string                `json:"jwtAudience,omitempty"`
+	JwtClientJwksAddress string                `json:"jwtJwksAddress,omitempty"`
+	JwtClientSecret      string                `json:"jwtClientSecret,omitempty"`
 	WhitelistSourceRange []string              `json:"whitelistSourceRange,omitempty"` // Deprecated
 	WhiteList            *WhiteList            `json:"whiteList,omitempty"`
 	Headers              *Headers              `json:"headers,omitempty"`
