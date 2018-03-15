@@ -5,8 +5,6 @@ import (
 	"github.com/containous/traefik/types"
 	"github.com/urfave/negroni"
 	"github.com/auth0/go-jwt-middleware"
-
-	"encoding/base64"
 	"fmt"
 	jwks "github.com/containous/traefik/middlewares/jwt/jwk"
 	"github.com/dgrijalva/jwt-go"
@@ -61,10 +59,7 @@ func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
 
 			if config.ClientSecret != "" && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
 				//Standard client Secret Jwt Validation
-				decoded, err = base64.URLEncoding.DecodeString(config.ClientSecret)
-				if err != nil {
-					return nil, err
-				}
+				decoded = []byte(config.ClientSecret)
 				return decoded, nil
 			}
 

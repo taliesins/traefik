@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"encoding/base64"
 
 	"github.com/containous/traefik/middlewares/tracing"
 	"github.com/containous/traefik/testhelpers"
@@ -21,10 +20,7 @@ import (
 const defaultAuthorizationHeaderName = "Authorization"
 
 func signHeaderWithJwtH256(req *http.Request, clientSecret string) error{
-	signingKey, err := base64.URLEncoding.DecodeString(clientSecret)
-	if err != nil {
-		return err
-	}
+	signingKey := []byte(clientSecret)
 
 	claims := &jwt.StandardClaims{
 	}
@@ -65,4 +61,31 @@ func TestClientSecretSuccess(t *testing.T) {
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+}
+
+func TestClientSecretWrongSecret(t *testing.T) {
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		ClientSecret: "mySecretWrong",
+	}, &tracing.Tracing{})
+	assert.NoError(t, err, "there should be no error")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	signHeaderWithJwtH256(req, "mySecret")
+
+	res, err := client.Do(req)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "signature is invalid\n", string(body), "they should be equal")
 }
