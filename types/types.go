@@ -183,10 +183,7 @@ type Frontend struct {
 	PassHostHeader       bool                  `json:"passHostHeader,omitempty"`
 	PassTLSCert          bool                  `json:"passTLSCert,omitempty"`
 	Priority             int                   `json:"priority"`
-	JwtIssuer            string                `json:"jwtIssuer,omitempty"`
-	JwtAudience          string                `json:"jwtAudience,omitempty"`
-	JwtClientJwksAddress string                `json:"jwtJwksAddress,omitempty"`
-	JwtClientSecret      string                `json:"jwtClientSecret,omitempty"`
+	Jwt					 *Jwt				   `json:"jwt,omitempty"`
 	WhitelistSourceRange []string              `json:"whitelistSourceRange,omitempty"` // Deprecated
 	WhiteList            *WhiteList            `json:"whiteList,omitempty"`
 	Headers              *Headers              `json:"headers,omitempty"`
@@ -213,6 +210,15 @@ type Redirect struct {
 	Regex       string `json:"regex,omitempty"`
 	Replacement string `json:"replacement,omitempty"`
 	Permanent   bool   `json:"permanent,omitempty"`
+}
+
+// Jwt authentication
+type Jwt struct {
+	Issuer            string                `json:"issuer,omitempty"`
+	Audience          string                `json:"audience,omitempty"`
+	JwksAddress 	  string                `json:"jwksAddress,omitempty"`
+	ClientSecret      string                `json:"clientSecret,omitempty"`
+	CertFile 		  string 				`json:"certFile,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.
@@ -396,7 +402,6 @@ type Auth struct {
 	Digest      *Digest  `json:"digest,omitempty" export:"true"`
 	Forward     *Forward `json:"forward,omitempty" export:"true"`
 	HeaderField string   `json:"headerField,omitempty" export:"true"`
-	Jwt         *Jwt     `export:"true"`
 }
 
 // Users authentication users
@@ -422,18 +427,6 @@ type Forward struct {
 	TLS                 *ClientTLS `description:"Enable TLS support" json:"tls,omitempty" export:"true"`
 	TrustForwardHeader  bool       `description:"Trust X-Forwarded-* headers" json:"trustForwardHeader,omitempty" export:"true"`
 	AuthResponseHeaders []string   `description:"Headers to be forwarded from auth response" json:"authResponseHeaders,omitempty"`
-}
-
-// Jwt authentication
-type Jwt struct {
-	Audience string `export:"true"`
-	Issuer   string `export:"true"`
-
-	JwksAddress string `description:"Jwks uri for tokens that are signed with jwks certs" export:"true"`
-
-	ClientSecret string `description:"Client secret for HS256, HS384, HS512" export:"true"`
-
-	CertFile string `description:"Cert file path to use for validating tokens that have been signed with private key" export:"true"`
 }
 
 // CanonicalDomain returns a lower case domain with trim space

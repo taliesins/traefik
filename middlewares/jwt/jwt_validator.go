@@ -1,20 +1,45 @@
-package auth
+package jwt
 
 import (
+	"github.com/containous/traefik/middlewares/tracing"
+	"github.com/containous/traefik/types"
+	"github.com/urfave/negroni"
+	"github.com/auth0/go-jwt-middleware"
+
 	"encoding/base64"
 	"fmt"
-
-	jwks "github.com/containous/traefik/middlewares/auth/jwk"
-
-	"github.com/auth0/go-jwt-middleware"
-	"github.com/containous/traefik/types"
+	jwks "github.com/containous/traefik/middlewares/jwt/jwk"
 	"github.com/dgrijalva/jwt-go"
-	"github.com/urfave/negroni"
 )
 
-func Jwt(config *types.Jwt) negroni.HandlerFunc {
-	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
+// Authenticator is a middleware that provides HTTP basic and digest authentication
+type JwtValidator struct {
+	Handler negroni.Handler
+}
 
+type tracingJwtValidator struct {
+	name           string
+	handler        negroni.Handler
+	clientSpanKind bool
+}
+
+func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*JwtValidator, error) {
+	jwtValidator := JwtValidator{}
+	tracingJwtValidator := tracingJwtValidator{}
+	tracingJwtValidator.handler = createAuthJwtHandler(config)
+	tracingJwtValidator.name = "Auth Jwt"
+	tracingJwtValidator.clientSpanKind = false
+
+	if tracingMiddleware != nil {
+		jwtValidator.Handler = tracingMiddleware.NewNegroniHandlerWrapper(tracingJwtValidator.name, tracingJwtValidator.handler, tracingJwtValidator.clientSpanKind)
+	} else {
+		jwtValidator.Handler = tracingJwtValidator.handler
+	}
+	return &jwtValidator, nil
+}
+
+func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
+	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
 			var (
 				decoded []byte

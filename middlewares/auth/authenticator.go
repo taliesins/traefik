@@ -64,10 +64,6 @@ func NewAuthenticator(authConfig *types.Auth, tracingMiddleware *tracing.Tracing
 		tracingAuth.handler = createAuthForwardHandler(authConfig)
 		tracingAuth.name = "Auth Forward"
 		tracingAuth.clientSpanKind = true
-	} else if authConfig.Jwt != nil && (authConfig.Jwt.Issuer != "" || authConfig.Jwt.JwksAddress != "" || authConfig.Jwt.ClientSecret != "" || authConfig.Jwt.CertFile != "") {
-		tracingAuthenticator.handler = createAuthJwtHandler(authConfig)
-		tracingAuthenticator.name = "Auth Jwt"
-		tracingAuthenticator.clientSpanKind = false
 	}
 
 	if tracingMiddleware != nil {
@@ -78,9 +74,6 @@ func NewAuthenticator(authConfig *types.Auth, tracingMiddleware *tracing.Tracing
 	return authenticator, nil
 }
 
-func createAuthJwtHandler(authConfig *types.Auth) negroni.HandlerFunc {
-	return Jwt(authConfig.Jwt)
-}
 func createAuthForwardHandler(authConfig *types.Auth) negroni.HandlerFunc {
 	return negroni.HandlerFunc(func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 		Forward(authConfig.Forward, w, r, next)

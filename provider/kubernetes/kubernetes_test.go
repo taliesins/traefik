@@ -2677,15 +2677,15 @@ func TestJwtSharedSecretInTemplate(t *testing.T) {
 
 	actual, err := provider.loadIngresses(client)
 	require.NoError(t, err, "error loading ingresses")
-	got := actual.Frontends["jwt-shared-secret/shared-secret"].JwtClientSecret
+	got := actual.Frontends["jwt-shared-secret/shared-secret"].Jwt.ClientSecret
 	if got != "mySecretIsBob" {
 		t.Fatalf("unexpected jwt client secret from ingress: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
 	}
-	actual.Frontends["jwt-shared-secret/shared-secret"].JwtAudience = "Audience"
+
 	actual = provider.loadConfig(*actual)
 
 	require.NotNil(t, actual)
-	got = actual.Frontends["jwt-shared-secret/shared-secret"].JwtClientSecret
+	got = actual.Frontends["jwt-shared-secret/shared-secret"].Jwt.ClientSecret
 	if got != "mySecretIsBob" {
 		t.Fatalf("unexpected jwt client secret from loadConfig: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
 	}

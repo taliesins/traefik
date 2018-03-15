@@ -248,7 +248,7 @@ func (p *Provider) loadIngresses(k8sClient Client) (*types.Configuration, error)
 						continue
 					}
 
-					jwtIssuer, jwtAudience, jwtClientJwksAddress, jwtClientSecret, err := handleJwtConfig(i, k8sClient)
+					jwt, err := handleJwtConfig(i, k8sClient)
 					if err != nil {
 						log.Errorf("Failed to retrieve jwt configuration for ingress %s/%s: %s", i.Namespace, i.Name, err)
 						continue
@@ -266,10 +266,7 @@ func (p *Provider) loadIngresses(k8sClient Client) (*types.Configuration, error)
 						Routes:               make(map[string]types.Route),
 						Priority:             priority,
 						BasicAuth:            basicAuthCreds,
-						JwtIssuer:            jwtIssuer,
-						JwtAudience:          jwtAudience,
-						JwtClientJwksAddress: jwtClientJwksAddress,
-						JwtClientSecret:      jwtClientSecret,
+						Jwt: 				  jwt,
 						WhiteList:      getWhiteList(i),
 						Redirect:       getFrontendRedirect(i, baseName, pa.Path),
 						EntryPoints:    entryPoints,
@@ -603,37 +600,49 @@ func parseRequestModifier(requestModifier, ruleType string) (string, error) {
 	return modifier + ":" + value, nil
 }
 
-func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (jwtIssuer string, jwtAudience string, jwtJwksAddress string, jwtClientSecret string, err error) {
-	jwtIssuer = getStringValue(i.Annotations, annotationKubernetesAuthJwtIssuer, "")
-	jwtAudience = getStringValue(i.Annotations, annotationKubernetesAuthJwtAudience, "")
-	jwtJwksAddress = getStringValue(i.Annotations, annotationKubernetesAuthJwtJwksAddress, "")
-	jwtClientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
+func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, error) {
+	issuer := getStringValue(i.Annotations, annotationKubernetesAuthJwtIssuer, "")
+	audience := getStringValue(i.Annotations, annotationKubernetesAuthJwtAudience, "")
+	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtJwksAddress, "")
+	clientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
 
-	if jwtClientSecretKey == "" && jwtIssuer == "" && jwtJwksAddress == "" && jwtAudience != "" {
-		return "", "", "", "", fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtIssuer)
+	jwt := types.Jwt{
+		Issuer:       issuer,
+		JwksAddress:  jwksAddress,
+		ClientSecret: "",
+		Audience:     audience,
+		CertFile:     "",
 	}
 
-	if jwtClientSecretKey == "" {
-		return jwtIssuer, jwtAudience, jwtJwksAddress, "", nil
+	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && clientSecretKey == ""  {
+		return nil, nil
 	}
 
-	jwtClientSecretArray, err := loadAuthCredentials(i.Namespace, jwtClientSecretKey, k8sClient)
+	if clientSecretKey == "" && jwt.Issuer == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtIssuer)
+	}
+
+	if clientSecretKey == "" {
+		return &jwt, nil
+	}
+
+	jwtClientSecretArray, err := loadAuthCredentials(i.Namespace, clientSecretKey, k8sClient)
 
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to get kubernetes secret called '%s': %s", jwtClientSecretKey, err)
+		return nil, fmt.Errorf("failed to get kubernetes secret called '%s': %s", clientSecretKey, err)
 	}
 
 	if len(jwtClientSecretArray) < 1 {
-		return "", "", "", "", fmt.Errorf("Kubernetes secret '%s' has no value", jwtClientSecretKey)
+		return nil, fmt.Errorf("Kubernetes secret '%s' has no value", clientSecretKey)
 	}
 
-	jwtClientSecret = jwtClientSecretArray[0]
+	jwt.ClientSecret = jwtClientSecretArray[0]
 
-	if jwtClientSecret == "" {
-		return "", "", "", "", fmt.Errorf("Client secret in kubernetes secret '%s' it should be '' and is '%v' '%#X'", jwtClientSecretKey, jwtClientSecret, jwtClientSecret)
+	if jwt.ClientSecret == "" {
+		return nil, fmt.Errorf("Client secret in kubernetes secret '%s' it should be '' and is '%v' '%#X'", clientSecretKey, jwt.ClientSecret, jwt.ClientSecret)
 	}
 
-	return jwtIssuer, jwtAudience, jwtJwksAddress, jwtClientSecret, nil
+	return &jwt, nil
 }
 
 func getRuleForHost(host string) string {

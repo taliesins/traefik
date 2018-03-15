@@ -901,11 +901,6 @@ var _templatesKubernetesTmpl = []byte(`[backends]
 
     {{end}}
 
-    jwtIssuer = "{{ $frontend.JwtIssuer }}"
-    jwtAudience = "{{ $frontend.JwtAudience }}"
-    jwtJwksAddress = "{{ $frontend.JwtClientJwksAddress }}"
-    jwtClientSecret = "{{ $frontend.JwtClientSecret }}"
-
     {{if $frontend.WhiteList }}
     [frontends."{{ $frontendName }}".whiteList]
       sourceRange = [{{range $frontend.WhiteList.SourceRange }}
@@ -932,6 +927,14 @@ var _templatesKubernetesTmpl = []byte(`[backends]
         backend = "{{ $page.Backend }}"
         query = "{{ $page.Query }}"
       {{end}}
+    {{end}}
+
+    {{if $frontend.Jwt }}
+    [frontends."{{ $frontendName }}".jwt]
+      issuer = "{{ $frontend.Jwt.Issuer }}"
+      audience = "{{ $frontend.Jwt.Audience }}"
+      jwksAddress = "{{ $frontend.Jwt.JwksAddress }}"
+      clientSecret = "{{ $frontend.Jwt.ClientSecret }}"
     {{end}}
 
     {{if $frontend.RateLimit }}
