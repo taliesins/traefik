@@ -46,33 +46,75 @@ func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
 				err     error
 			)
 
-			claims := token.Claims.(jwt.MapClaims)
+			//Get alg to use
+			algHeader, ok := token.Header["alg"]
+			if !ok{
+				return nil, fmt.Errorf("Cannot get alg to use")
+			}
+			alg := algHeader.(string)
 
-			// Get iss from JWT and validate against desired iss
-			if claims["iss"].(string) != config.Issuer {
-				return nil, fmt.Errorf("cannot validate iss claim")
+			kid := ""
+			kidHeader, ok := token.Header["kid"]
+			if ok{
+				kid = kidHeader.(string)
 			}
 
-			// Get audience from JWT and validate against desired audience
-			if claims["aud"].(string) != config.Audience {
-				return nil, fmt.Errorf("Cannot validate audience claim")
-			}
-
-			// If kid exists then get the public key from the JWT's issuer, otherwise use client secret
-			if _, ok := token.Header["kid"]; ok && (config.Issuer != "" || config.JwksAddress != "") {
-				decoded, err = jwks.GetJwksPublicKey(token, config.Issuer, config.JwksAddress)
-			} else if config.ClientSecret != "" && (token.Header["alg"] == "HS256" || token.Header["alg"] == "HS384" || token.Header["alg"] == "HS512") {
+			if config.ClientSecret != "" && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
+				//Standard client Secret Jwt Validation
 				decoded, err = base64.URLEncoding.DecodeString(config.ClientSecret)
-			} else if config.CertFile != "" {
-				decoded, err = jwks.GetPublicKeyFile(token, config.CertFile)
-			} else {
-				err = fmt.Errorf("Jwt token does not match any allowed algorithm type")
-			}
-			if err != nil {
-				return nil, err
+				if err != nil {
+					return nil, err
+				}
+				return decoded, nil
 			}
 
-			return decoded, nil
+			if config.CertFile != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "")) {
+				//Standard certificate Jwt validation
+				decoded, err = jwks.GetPublicKeyFile(alg, config.CertFile)
+				if err != nil {
+					return nil, err
+				}
+				return decoded, nil
+			}
+
+			// If kid exists then get the public key from the JWT's issuer
+			if kid != "" && (config.Issuer != "" || config.JwksAddress != "") {
+				claims := token.Claims.(jwt.MapClaims)
+
+				iss := ""
+				if claims["iss"] != nil {
+					iss = claims["iss"].(string)
+				}
+
+				aud := ""
+				if claims["aud"] != nil {
+					aud = claims["aud"].(string)
+				}
+
+				exp := int64(0)
+				if claims["exp"] != nil {
+					exp = claims["exp"].(int64)
+				}
+
+				// Get iss from JWT and validate against desired iss
+				if config.Issuer != "" && iss != config.Issuer {
+					return nil, fmt.Errorf("Cannot validate iss claim")
+				}
+
+				// Get audience from JWT and validate against desired audience
+				if config.Audience != "" && aud != config.Audience {
+					return nil, fmt.Errorf("Cannot validate audience claim")
+				}
+
+				decoded, err = jwks.GetJwksPublicKey(alg, kid, iss, exp, config.Issuer, config.JwksAddress)
+
+				if err != nil {
+					return nil, err
+				}
+				return decoded, nil
+			}
+
+			return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
 		},
 	})
 

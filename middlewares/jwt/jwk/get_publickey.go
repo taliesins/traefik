@@ -10,8 +10,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/dgrijalva/jwt-go"
 	"github.com/hashicorp/golang-lru"
 	"gopkg.in/square/go-jose.v1"
 )
@@ -80,10 +78,8 @@ func GetJwksUri(issuer string) (jwksUri string, err error) {
 // GetPublicKey verifies the desired iss and aud against the token's claims, and then
 // tries to fetch a public key from the iss. It returns the public key as byte slice
 // on success and error on failure.
-func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) {
-	claims := token.Claims.(jwt.MapClaims)
-
-	cacheKey := fmt.Sprintf("%s|%s", token.Header["kid"].(string), claims["iss"].(string))
+func GetJwksPublicKey(algorithm string, kid string, iss string, exp int64, expectedIssuer string, explicitJwksUri string) ([]byte, error) {
+	cacheKey := fmt.Sprintf("%s|%s", kid, iss)
 
 	// Try to get and return existing entry from cache. If cache is expired,
 	// it will try proceed with rest of the function call
@@ -92,7 +88,7 @@ func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) 
 		val := cached.(*jwksCacheValue)
 
 		// Check for alg
-		if val.Algorithm != token.Header["alg"] {
+		if val.Algorithm != algorithm {
 			return nil, fmt.Errorf("mismatch in token and JWKS algorithms")
 		}
 
@@ -103,15 +99,15 @@ func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) 
 		}
 	}
 
-	if jwksUri == "" {
-		newJwksUri, err := GetJwksUri(issuer)
+	if explicitJwksUri == "" {
+		newJwksUri, err := GetJwksUri(expectedIssuer)
 		if err != nil {
 			return nil, fmt.Errorf("unable to retrieve jwks uri: %s", err)
 		}
-		jwksUri = newJwksUri
+		explicitJwksUri = newJwksUri
 	}
 
-	resp, err := http.Get(jwksUri)
+	resp, err := http.Get(explicitJwksUri)
 	if err != nil {
 		return nil, fmt.Errorf("json validation error: %s", err)
 	}
@@ -129,15 +125,13 @@ func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) 
 	}
 
 	// Get desired key from JWKS
-	kid := token.Header["kid"].(string)
 	key := jwks.Key(kid)[0]
 	if !key.Valid() {
 		return nil, fmt.Errorf("invalid JWKS key")
 	}
 
 	// Check for alg
-	alg := key.Algorithm
-	if alg != token.Header["alg"] {
+	if key.Algorithm != algorithm {
 		return nil, fmt.Errorf("mismatch in token and JWKS algorithms")
 	}
 
@@ -152,9 +146,8 @@ func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) 
 	decoded := buf.Bytes()
 
 	// Store value in cache
-	exp := claims["exp"].(int64)
 	lruCache.Add(cacheKey, &jwksCacheValue{
-		Algorithm: alg,
+		Algorithm: algorithm,
 		Data:      decoded,
 		Expiry:    time.Unix(exp, 0),
 	})
@@ -162,8 +155,7 @@ func GetJwksPublicKey(token *jwt.Token, issuer, jwksUri string) ([]byte, error) 
 	return decoded, nil
 }
 
-func GetPublicKeyFile(token *jwt.Token, certFile string) ([]byte, error) {
-
+func GetPublicKeyFile(algorithm string, certFile string) ([]byte, error) {
 	// Try to get and return existing entry from cache. If cache is expired,
 	// it will try proceed with rest of the function call
 	cached, ok := lruCache.Get(certFile)
@@ -171,7 +163,7 @@ func GetPublicKeyFile(token *jwt.Token, certFile string) ([]byte, error) {
 		val := cached.(*jwksCacheValue)
 
 		// Check for alg
-		if val.Algorithm != token.Header["alg"] {
+		if val.Algorithm != algorithm {
 			return nil, fmt.Errorf("mismatch in token and expected algorithm")
 		}
 
@@ -197,10 +189,10 @@ func GetPublicKeyFile(token *jwt.Token, certFile string) ([]byte, error) {
 		log.Fatal(err)
 	}
 
-	cert_alg := cert.SignatureAlgorithm.String()
+	certAlg := cert.SignatureAlgorithm.String()
 
 	alg := ""
-	switch cert_alg {
+	switch certAlg {
 	case "SHA1WithRSA":
 		alg = "RS"
 	case "SHA256WithRSA":
@@ -209,14 +201,12 @@ func GetPublicKeyFile(token *jwt.Token, certFile string) ([]byte, error) {
 		alg = "RS384"
 	case "SHA512WithRSA":
 		alg = "RS512"
-
 	case "SHA256WithRSAPSS":
 		alg = "PS256"
 	case "SHA384WithRSAPSS":
 		alg = "PS384"
 	case "SHA512WithRSAPSS":
 		alg = "PS512"
-
 	case "ECDSAWithSHA1":
 		alg = "ES"
 	case "ECDSAWithSHA256":
@@ -225,21 +215,19 @@ func GetPublicKeyFile(token *jwt.Token, certFile string) ([]byte, error) {
 		alg = "ES384"
 	case "ECDSAWithSHA512":
 		alg = "ES512"
-
 	case "DSAWithSHA1":
 		alg = "DS"
 	case "DSAWithSHA256":
 		alg = "DS256"
-
 	case "MD2WithRSA":
 		alg = "MD2"
 	case "MD5WithRSA":
 		alg = "MD5"
 	default:
-		return nil, fmt.Errorf("Cert with signing type of %s cannot be used", cert_alg)
+		return nil, fmt.Errorf("Cert with signing type of %s cannot be used", certAlg)
 	}
 
-	if alg != token.Header["alg"] {
+	if alg != algorithm {
 		return nil, fmt.Errorf("mismatch in token and expected algorithm")
 	}
 
