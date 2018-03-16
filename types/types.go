@@ -218,7 +218,7 @@ type Jwt struct {
 	Audience          string                `json:"audience,omitempty"`
 	JwksAddress 	  string                `json:"jwksAddress,omitempty"`
 	ClientSecret      string                `json:"clientSecret,omitempty"`
-	CertFile 		  string 				`json:"certFile,omitempty"`
+	Cert              string 				`json:"cert,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.

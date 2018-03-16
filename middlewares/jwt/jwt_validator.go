@@ -6,7 +6,7 @@ import (
 	"github.com/urfave/negroni"
 	"github.com/auth0/go-jwt-middleware"
 	"fmt"
-	jwks "github.com/containous/traefik/middlewares/jwt/jwk"
+
 	"github.com/dgrijalva/jwt-go"
 )
 
@@ -36,20 +36,18 @@ func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*Jw
 	return &jwtValidator, nil
 }
 
-func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
+func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
-			var (
-				decoded []byte
-				err     error
-			)
-
 			//Get alg to use
 			algHeader, ok := token.Header["alg"]
 			if !ok{
 				return nil, fmt.Errorf("Cannot get alg to use")
 			}
 			alg := algHeader.(string)
+
+			//TODO: Validate allowed algs here
+			//return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
 
 			kid := ""
 			kidHeader, ok := token.Header["kid"]
@@ -59,17 +57,19 @@ func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
 
 			if config.ClientSecret != "" && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
 				//Standard client Secret Jwt Validation
-				decoded = []byte(config.ClientSecret)
-				return decoded, nil
+				clientSecret := []byte(config.ClientSecret)
+				return clientSecret, nil
 			}
 
-			if config.CertFile != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "")) {
+			if config.Cert != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "")) {
 				//Standard certificate Jwt validation
-				decoded, err = jwks.GetPublicKeyFile(alg, config.CertFile)
+				publicKey, _, err := GetPublicKeyFromFileOrContent(config.Cert)
 				if err != nil {
 					return nil, err
 				}
-				return decoded, nil
+
+				//TODO: Validate for ES256,ES384,ES512
+				return publicKey, nil
 			}
 
 			// If kid exists then get the public key from the JWT's issuer
@@ -86,11 +86,6 @@ func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
 					aud = claims["aud"].(string)
 				}
 
-				exp := int64(0)
-				if claims["exp"] != nil {
-					exp = claims["exp"].(int64)
-				}
-
 				// Get iss from JWT and validate against desired iss
 				if config.Issuer != "" && iss != config.Issuer {
 					return nil, fmt.Errorf("Cannot validate iss claim")
@@ -101,12 +96,23 @@ func createAuthJwtHandler(config *types.Jwt) negroni.HandlerFunc {
 					return nil, fmt.Errorf("Cannot validate audience claim")
 				}
 
-				decoded, err = jwks.GetJwksPublicKey(alg, kid, iss, exp, config.Issuer, config.JwksAddress)
+				var (
+					err                       error
+					publicKey                 interface{}
+				)
+
+				if config.JwksAddress != "" {
+					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
+				} else {
+					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.Issuer)
+				}
 
 				if err != nil {
 					return nil, err
 				}
-				return decoded, nil
+
+				//TODO: Validate for ES256,ES384,ES512
+				return publicKey, nil
 			}
 
 			return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
