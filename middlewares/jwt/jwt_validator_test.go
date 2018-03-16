@@ -65,6 +65,155 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 	return nil
 }
 
+func TestWithES256Success(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/es256")
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(fmt.Sprintf("%s.crt", certPath)),
+		KeyFile:  traefiktls.FileOrContent(fmt.Sprintf("%s.key", certPath)),
+	}
+
+	if  !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if  !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	certContent, err := certificate.CertFile.Read()
+	if err != nil{
+		panic(err)
+	}
+
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		Cert: string(certContent),
+	}, &tracing.Tracing{})
+	assert.NoError(t, err, "there should be no error")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES256)
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+}
+
+func TestWithES384Success(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/es384")
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(fmt.Sprintf("%s.crt", certPath)),
+		KeyFile:  traefiktls.FileOrContent(fmt.Sprintf("%s.key", certPath)),
+	}
+
+	if  !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if  !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	certContent, err := certificate.CertFile.Read()
+	if err != nil{
+		panic(err)
+	}
+
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		Cert: string(certContent),
+	}, &tracing.Tracing{})
+	assert.NoError(t, err, "there should be no error")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES384)
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+}
+
+
+func TestWithES512Success(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/es512")
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(fmt.Sprintf("%s.crt", certPath)),
+		KeyFile:  traefiktls.FileOrContent(fmt.Sprintf("%s.key", certPath)),
+	}
+
+	if  !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if  !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	certContent, err := certificate.CertFile.Read()
+	if err != nil{
+		panic(err)
+	}
+
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		Cert: string(certContent),
+	}, &tracing.Tracing{})
+	assert.NoError(t, err, "there should be no error")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES512)
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+}
+
+
 func TestWithPS256Success(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
 	certPath := path.Join(path.Dir(filename), "signing/rsa")
