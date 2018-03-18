@@ -214,11 +214,12 @@ type Redirect struct {
 
 // Jwt authentication
 type Jwt struct {
-	Issuer            string                `json:"issuer,omitempty"`
-	Audience          string                `json:"audience,omitempty"`
-	JwksAddress 	  string                `json:"jwksAddress,omitempty"`
-	ClientSecret      string                `json:"clientSecret,omitempty"`
-	Cert              string 				`json:"cert,omitempty"`
+	Issuer               string `json:"issuer,omitempty"`
+	Audience             string `json:"audience,omitempty"`
+	JwksAddress          string `json:"jwksAddress,omitempty"`
+	OidcDiscoveryAddress string `json:"oidcDiscoveryAddress,omitempty"`
+	ClientSecret         string `json:"clientSecret,omitempty"`
+	PublicKey            string `json:"cert,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.
@@ -509,7 +510,7 @@ func (b *Buckets) SetValue(val interface{}) {
 }
 
 // ClientTLS holds TLS specific configurations as client
-// CA, Cert and Key can be either path or file contents
+// CA, PublicKey and Key can be either path or file contents
 type ClientTLS struct {
 	CA                 string `description:"TLS CA" json:"ca,omitempty"`
 	CAOptional         bool   `description:"TLS CA.Optional" json:"caOptional,omitempty"`

@@ -13,6 +13,7 @@ import (
 	"gopkg.in/square/go-jose.v1"
 	traefiktls "github.com/containous/traefik/tls"
 	"github.com/dgrijalva/jwt-go"
+	"net/url"
 )
 
 var lruCache *lru.Cache
@@ -81,6 +82,22 @@ func GetPublicKeyFromOpenIdConnectDiscoveryUri(kid string, openIdConnectDiscover
 	}
 
 	return GetPublicKeyFromJwksUri(kid, explicitJwksUri)
+}
+
+func GetPublicKeyFromIssuerUri(kid string, issuerUri string) (interface{}, x509.SignatureAlgorithm, error) {
+	wellKnownUri, err := url.Parse(".well-known/openid-configuration")
+	if err != nil {
+		return nil, x509.UnknownSignatureAlgorithm, err
+	}
+
+	openIdConnectDiscoveryUri, err := url.Parse(issuerUri)
+	if err != nil {
+		return nil, x509.UnknownSignatureAlgorithm, err
+	}
+
+	openIdConnectDiscoveryUri = openIdConnectDiscoveryUri.ResolveReference(wellKnownUri)
+
+	return GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, openIdConnectDiscoveryUri.String())
 }
 
 func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.SignatureAlgorithm, error) {

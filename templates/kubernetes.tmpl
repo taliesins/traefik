@@ -122,6 +122,8 @@
       issuer = "{{ $frontend.Jwt.Issuer }}"
       audience = "{{ $frontend.Jwt.Audience }}"
       jwksAddress = "{{ $frontend.Jwt.JwksAddress }}"
+      oidcDiscoveryAddress = "{{ $frontend.Jwt.OidcDiscoveryAddress }}"
+      publicKey = "{{ $frontend.Jwt.PublicKey }}"
       clientSecret = "{{ $frontend.Jwt.ClientSecret }}"
     {{end}}
 

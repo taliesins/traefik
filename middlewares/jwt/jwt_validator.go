@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/dgrijalva/jwt-go"
-	"net/url"
 )
 
 // Authenticator is a middleware that provides HTTP basic and digest authentication
@@ -61,9 +60,9 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 				return clientSecret, nil
 			}
 
-			if config.Cert != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "")) {
+			if config.PublicKey != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.OidcDiscoveryAddress == "")) {
 				//Standard certificate Jwt validation
-				publicKey, _, err := GetPublicKeyFromFileOrContent(config.Cert)
+				publicKey, _, err := GetPublicKeyFromFileOrContent(config.PublicKey)
 				if err != nil {
 					return nil, err
 				}
@@ -73,7 +72,7 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 			}
 
 			// If kid exists then get the public key from the JWT's issuer
-			if kid != "" && (config.Issuer != "" || config.JwksAddress != "") {
+			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.OidcDiscoveryAddress != "") {
 				claims := token.Claims.(jwt.MapClaims)
 
 				iss := ""
@@ -103,20 +102,10 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 
 				if config.JwksAddress != "" {
 					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
-				} else {
-					wellKnownUri, err := url.Parse(".well-known/openid-configuration")
-					if err != nil {
-						return nil, err
-					}
-
-					openIdConnectDiscoveryUri, err := url.Parse(config.Issuer)
-					if err != nil {
-						return nil, err
-					}
-
-					openIdConnectDiscoveryUri = openIdConnectDiscoveryUri.ResolveReference(wellKnownUri)
-
-					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, openIdConnectDiscoveryUri.String())
+				} else if config.OidcDiscoveryAddress != "" {
+					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.OidcDiscoveryAddress)
+				} else if config.Issuer != "" {
+					publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
 				}
 
 				if err != nil {

@@ -1079,11 +1079,30 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtPublicKey, "publicKey"),
+			iRules(
+				iRule(
+					iHost("jwt-public-key"),
+					iPaths(onePath(iPath("/public-key"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
 			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
 			iRules(
 				iRule(
-					iHost("jwt-discovered-jwks"),
-					iPaths(onePath(iPath("/discovered-jwks"), iBackend("service1", intstr.FromInt(80))))),
+					iHost("jwt-issuer-uri"),
+					iPaths(onePath(iPath("/issuer-uri"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthJwtOidcDiscoveryAddress, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration"),
+			iRules(
+				iRule(
+					iHost("jwt-oidc-discovery-uri"),
+					iPaths(onePath(iPath("/oidc-discovery-uri"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
@@ -1092,8 +1111,8 @@ func TestIngressAnnotations(t *testing.T) {
 			iAnnotation(annotationKubernetesAuthJwtJwksAddress, "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys"),
 			iRules(
 				iRule(
-					iHost("jwt-explicit-jwks"),
-					iPaths(onePath(iPath("/explicit-jwks"), iBackend("service1", intstr.FromInt(80))))),
+					iHost("jwt-jwks-uri"),
+					iPaths(onePath(iPath("/jwks-uri"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
@@ -1379,13 +1398,25 @@ rateset:
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-discovered-jwks/discovered-jwks",
+			backend("jwt-public-key/public-key",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-explicit-jwks/explicit-jwks",
+			backend("jwt-issuer-uri/issuer-uri",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
+			backend("jwt-oidc-discovery-uri/oidc-discovery-uri",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
+			backend("jwt-jwks-uri/jwks-uri",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
@@ -1506,24 +1537,38 @@ rateset:
 			),
 			frontend("jwt-shared-secret/shared-secret",
 				passHostHeader(),
-				jwtAuth("", "", "", "myUser:myEncodedPW"),
+				jwtAuth("", "", "", "", "", "myUser:myEncodedPW"),
 				routes(
 					route("/shared-secret", "PathPrefix:/shared-secret"),
 					route("jwt-shared-secret", "Host:jwt-shared-secret")),
 			),
-			frontend("jwt-discovered-jwks/discovered-jwks",
+			frontend("jwt-public-key/public-key",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", ""),
+				jwtAuth("", "", "", "", "publicKey", ""),
 				routes(
-					route("/discovered-jwks", "PathPrefix:/discovered-jwks"),
-					route("jwt-discovered-jwks", "Host:jwt-discovered-jwks")),
+					route("/public-key", "PathPrefix:/public-key"),
+					route("jwt-public-key", "Host:jwt-public-key")),
 			),
-			frontend("jwt-explicit-jwks/explicit-jwks",
+			frontend("jwt-issuer-uri/issuer-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", ""),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", ""),
 				routes(
-					route("/explicit-jwks", "PathPrefix:/explicit-jwks"),
-					route("jwt-explicit-jwks", "Host:jwt-explicit-jwks")),
+					route("/issuer-uri", "PathPrefix:/issuer-uri"),
+					route("jwt-issuer-uri", "Host:jwt-issuer-uri")),
+			),
+			frontend("jwt-oidc-discovery-uri/oidc-discovery-uri",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", "", ""),
+				routes(
+					route("/oidc-discovery-uri", "PathPrefix:/oidc-discovery-uri"),
+					route("jwt-oidc-discovery-uri", "Host:jwt-oidc-discovery-uri")),
+			),
+			frontend("jwt-jwks-uri/jwks-uri",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", ""),
+				routes(
+					route("/jwks-uri", "PathPrefix:/jwks-uri"),
+					route("jwt-jwks-uri", "Host:jwt-jwks-uri")),
 			),
 			frontend("redirect/https",
 				passHostHeader(),

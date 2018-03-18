@@ -943,7 +943,7 @@ func (s *Server) loadConfig(configurations types.Configurations, globalConfigura
 						}
 					}
 
-					if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.ClientSecret != "") {
+					if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.OidcDiscoveryAddress != "" || frontend.Jwt.ClientSecret != "") {
 						jwtValidatorMiddleware, err := mjwt.NewJwtValidator(frontend.Jwt, s.tracingMiddleware)
 
 						if err != nil {

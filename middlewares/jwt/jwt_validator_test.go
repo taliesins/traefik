@@ -126,7 +126,7 @@ func TestWithES256Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -178,7 +178,7 @@ func TestWithES384Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -231,7 +231,7 @@ func TestWithES512Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -284,7 +284,7 @@ func TestWithPS256Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -336,7 +336,7 @@ func TestWithPS384Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -388,7 +388,7 @@ func TestWithPS512Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -440,7 +440,7 @@ func TestWithRS256Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -492,7 +492,7 @@ func TestWithRS384Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -544,7 +544,7 @@ func TestWithRS512Success(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -596,7 +596,7 @@ func TestWithUnsignedRsaPublicKeySuccess(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -648,7 +648,7 @@ func TestWithSignedRsaPublicKeySuccess(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -699,7 +699,7 @@ func TestWithRsaPublicKeySignedWithWrongPrivateKeyFailure(t *testing.T) {
 	}
 
 	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
-		Cert: string(certContent),
+		PublicKey: string(certContent),
 	}, &tracing.Tracing{})
 	assert.NoError(t, err, "there should be no error")
 
@@ -929,3 +929,78 @@ func TestWithRS256UsingIssuerUriSuccess(t *testing.T) {
 	assert.Equal(t, "traefik\n", string(body), "they should be equal")
 }
 
+func TestWithRS256UsingOpenIdConnectDiscoveryUriSuccess(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/rsa")
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(fmt.Sprintf("%s.crt", certPath)),
+		KeyFile:  traefiktls.FileOrContent(fmt.Sprintf("%s.key", certPath)),
+	}
+
+	if !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if  err != nil {
+		panic(err)
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if  err != nil {
+		panic(err)
+	}
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if (r.RequestURI == "/.well-known/openid-configuration") {
+			jwksUri := fmt.Sprintf("http://%s/common/discovery/keys", r.Host)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if (r.RequestURI == "/common/discovery/keys") {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+	defer jwksServer.Close()
+
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		Issuer: jwksServer.URL,
+	}, &tracing.Tracing{})
+	assert.NoError(t, err, "there should be no error")
+
+	kid := jsonWebKeySet.Keys[0].KeyID
+	claims := &jwt.StandardClaims{
+		Issuer:jwksServer.URL,
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	err = signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, kid, claims)
+	if  err != nil {
+		panic(err)
+	}
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+}

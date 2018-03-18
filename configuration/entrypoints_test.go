@@ -42,7 +42,7 @@ func Test_parseEntryPointsConfiguration(t *testing.T) {
 				"Auth.Forward.TrustForwardHeader:true " +
 				"Auth.Forward.TLS.CA:path/to/local.crt " +
 				"Auth.Forward.TLS.CAOptional:true " +
-				"Auth.Forward.TLS.Cert:path/to/foo.cert " +
+				"Auth.Forward.TLS.PublicKey:path/to/foo.cert " +
 				"Auth.Forward.TLS.Key:path/to/foo.key " +
 				"Auth.Forward.TLS.InsecureSkipVerify:true " +
 				"WhiteListSourceRange:10.42.0.0/16,152.89.1.33/32,afed:be44::/16 " +
@@ -203,7 +203,7 @@ func TestEntryPoints_Set(t *testing.T) {
 				"Auth.Forward.TrustForwardHeader:true " +
 				"Auth.Forward.TLS.CA:path/to/local.crt " +
 				"Auth.Forward.TLS.CAOptional:true " +
-				"Auth.Forward.TLS.Cert:path/to/foo.cert " +
+				"Auth.Forward.TLS.PublicKey:path/to/foo.cert " +
 				"Auth.Forward.TLS.Key:path/to/foo.key " +
 				"Auth.Forward.TLS.InsecureSkipVerify:true " +
 				"WhiteListSourceRange:10.42.0.0/16,152.89.1.33/32,afed:be44::/16 " +

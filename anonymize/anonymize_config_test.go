@@ -73,7 +73,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 					Address: "foo Address",
 					TLS: &types.ClientTLS{
 						CA:                 "foo CA",
-						Cert:               "foo Cert",
+						Cert:               "foo PublicKey",
 						Key:                "foo Key",
 						InsecureSkipVerify: true,
 					},
@@ -118,7 +118,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 					Address: "fii Address",
 					TLS: &types.ClientTLS{
 						CA:                 "fii CA",
-						Cert:               "fii Cert",
+						Cert:               "fii PublicKey",
 						Key:                "fii Key",
 						InsecureSkipVerify: true,
 					},
@@ -216,7 +216,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 		Domain:   "docker Domain",
 		TLS: &types.ClientTLS{
 			CA:                 "docker CA",
-			Cert:               "docker Cert",
+			Cert:               "docker PublicKey",
 			Key:                "docker Key",
 			InsecureSkipVerify: true,
 		},
@@ -272,7 +272,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 		MarathonLBCompatibility: true,
 		TLS: &types.ClientTLS{
 			CA:                 "marathon CA",
-			Cert:               "marathon Cert",
+			Cert:               "marathon PublicKey",
 			Key:                "marathon Key",
 			InsecureSkipVerify: true,
 		},
@@ -503,7 +503,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 			Prefix:   "etcd Prefix",
 			TLS: &types.ClientTLS{
 				CA:                 "etcd CA",
-				Cert:               "etcd Cert",
+				Cert:               "etcd PublicKey",
 				Key:                "etcd Key",
 				InsecureSkipVerify: true,
 			},
@@ -535,7 +535,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 			Prefix:   "zk Prefix",
 			TLS: &types.ClientTLS{
 				CA:                 "zk CA",
-				Cert:               "zk Cert",
+				Cert:               "zk PublicKey",
 				Key:                "zk Key",
 				InsecureSkipVerify: true,
 			},
@@ -567,7 +567,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 			Prefix:   "boltdb Prefix",
 			TLS: &types.ClientTLS{
 				CA:                 "boltdb CA",
-				Cert:               "boltdb Cert",
+				Cert:               "boltdb PublicKey",
 				Key:                "boltdb Key",
 				InsecureSkipVerify: true,
 			},
@@ -599,7 +599,7 @@ func TestDo_globalConfiguration(t *testing.T) {
 			Prefix:   "consul Prefix",
 			TLS: &types.ClientTLS{
 				CA:                 "consul CA",
-				Cert:               "consul Cert",
+				Cert:               "consul PublicKey",
 				Key:                "consul Key",
 				InsecureSkipVerify: true,
 			},

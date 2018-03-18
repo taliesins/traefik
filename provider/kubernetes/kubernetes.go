@@ -604,22 +604,25 @@ func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt
 	issuer := getStringValue(i.Annotations, annotationKubernetesAuthJwtIssuer, "")
 	audience := getStringValue(i.Annotations, annotationKubernetesAuthJwtAudience, "")
 	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtJwksAddress, "")
+	oidcDiscoveryAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtOidcDiscoveryAddress, "")
+	publicKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtPublicKey, "")
 	clientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
 
 	jwt := types.Jwt{
-		Issuer:       issuer,
-		JwksAddress:  jwksAddress,
-		ClientSecret: "",
-		Audience:     audience,
-		CertFile:     "",
+		Issuer:               issuer,
+		Audience:             audience,
+		JwksAddress:          jwksAddress,
+		OidcDiscoveryAddress: oidcDiscoveryAddress,
+		PublicKey:            publicKey,
+		ClientSecret:         "",
 	}
 
-	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && clientSecretKey == ""  {
+	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && publicKey == "" && clientSecretKey == ""  {
 		return nil, nil
 	}
 
-	if clientSecretKey == "" && jwt.Issuer == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
-		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtIssuer)
+	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.JwksAddress == "" && jwt.OidcDiscoveryAddress == "" && jwt.Audience != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v or %v or v% must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer,annotationKubernetesAuthJwtPublicKey , annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtIssuer)
 	}
 
 	if clientSecretKey == "" {
