@@ -16,6 +16,11 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"runtime"
 	"path"
+	"gopkg.in/square/go-jose.v1"
+	"encoding/json"
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"reflect"
 )
 
 // defaultAuthorizationHeaderName is the default header name where the Auth
@@ -39,7 +44,7 @@ func signHeaderWithClientSecret(req *http.Request, clientSecret string) error{
 	return nil
 }
 
-func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod) error {
+func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string) error {
 	privateKeyPemData, err := certificate.KeyFile.Read()
 	if err != nil {
 		return err
@@ -54,6 +59,9 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 	}
 
 	token := jwt.NewWithClaims(signingMethod, claims)
+	if kid != "" {
+		token.Header["kid"] = kid
+	}
 
 	signedToken, err := token.SignedString(privateKey)
 	if err != nil {
@@ -64,6 +72,42 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 
 	return nil
 }
+
+func getJsonWebset(certificate *traefiktls.Certificate)(*jose.JsonWebKeySet, error){
+	publicKeyPemData, err := certificate.CertFile.Read()
+	if err != nil {
+		return nil, err
+	}
+
+	publicKey, _, err := GetPublicKeyFromPem(publicKeyPemData)
+	if err != nil {
+		return nil, err
+	}
+
+	var algorithm string
+	switch key := publicKey.(type) {
+	case *rsa.PublicKey:
+		algorithm = "RSA"
+	case *ecdsa.PublicKey:
+		algorithm = "EC"
+	default:
+		return nil, fmt.Errorf("unknown private key type '%s'", reflect.TypeOf(key))
+	}
+
+	jsonWebKeySet := &jose.JsonWebKeySet{
+		Keys:[]jose.JsonWebKey{
+			{
+				Key:       publicKey,
+				KeyID:     "0",
+				Use:       "sig",
+				Algorithm: algorithm,
+			},
+		},
+	}
+
+	return jsonWebKeySet, nil
+}
+
 
 func TestWithES256Success(t *testing.T) {
 	_, filename, _, _ := runtime.Caller(0)
@@ -102,7 +146,7 @@ func TestWithES256Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES256, "")
 
 	res, err := client.Do(req)
 
@@ -151,7 +195,7 @@ func TestWithES384Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES384)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES384, "")
 
 	res, err := client.Do(req)
 
@@ -201,7 +245,7 @@ func TestWithES512Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES512)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodES512, "")
 
 	res, err := client.Do(req)
 
@@ -251,7 +295,7 @@ func TestWithPS256Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS256, "")
 
 	res, err := client.Do(req)
 
@@ -300,7 +344,7 @@ func TestWithPS384Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS384)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS384, "")
 
 	res, err := client.Do(req)
 
@@ -349,7 +393,7 @@ func TestWithPS512Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS512)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodPS512, "")
 
 	res, err := client.Do(req)
 
@@ -398,7 +442,7 @@ func TestWithRS256Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, "")
 
 	res, err := client.Do(req)
 
@@ -447,7 +491,7 @@ func TestWithRS384Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS384)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS384, "")
 
 	res, err := client.Do(req)
 
@@ -496,7 +540,7 @@ func TestWithRS512Success(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS512)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS512, "")
 
 	res, err := client.Do(req)
 
@@ -545,7 +589,7 @@ func TestWithUnsignedRsaPublicKeySuccess(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, "")
 
 	res, err := client.Do(req)
 
@@ -594,7 +638,7 @@ func TestWithSignedRsaPublicKeySuccess(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, "")
 
 	res, err := client.Do(req)
 
@@ -642,7 +686,7 @@ func TestWithRsaPublicKeySignedWithWrongPrivateKeyFailure(t *testing.T) {
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256)
+	signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, "")
 
 	res, err := client.Do(req)
 
@@ -706,4 +750,73 @@ func TestWithClientSecretWrongSecret(t *testing.T) {
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
 	assert.NotEqual(t, "traefik\n", string(body), "they should not be equal")
+}
+
+func TestWithRS256UsingExplicitJwksSuccess(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/rsa")
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(fmt.Sprintf("%s.crt", certPath)),
+		KeyFile:  traefiktls.FileOrContent(fmt.Sprintf("%s.key", certPath)),
+	}
+
+	if  !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if  !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if  err != nil {
+		panic(err)
+	}
+
+	kid := jsonWebKeySet.Keys[0].KeyID
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if  err != nil {
+		panic(err)
+	}
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(jsonWebKeySetJson)
+	}))
+	defer jwksServer.Close()
+
+	//https://login.microsoftonline.com/fabrikam.onmicrosoft.com/v2.0/.well-known/openid-configuration
+
+	jwtMiddleware, err := NewJwtValidator(&types.Jwt{
+		JwksAddress: jwksServer.URL,
+	}, &tracing.Tracing{})
+
+	assert.NoError(t, err, "there should be no error")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewServer(n)
+	defer ts.Close()
+
+	client := &http.Client{}
+	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
+	err = signHeaderWithCertificate(req, certificate, jwt.SigningMethodRS256, kid)
+	if  err != nil {
+		panic(err)
+	}
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, "traefik\n", string(body), "they should be equal")
 }

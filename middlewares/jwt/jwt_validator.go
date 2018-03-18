@@ -68,7 +68,7 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 					return nil, err
 				}
 
-				//TODO: Validate for ES256,ES384,ES512
+				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
 
@@ -111,7 +111,7 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 					return nil, err
 				}
 
-				//TODO: Validate for ES256,ES384,ES512
+				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
 

@@ -103,33 +103,23 @@ func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.Sign
 
 	resp, err := http.Get(jwksUri)
 	if err != nil {
-		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("json validation error: %s", err)
+		return nil, x509.UnknownSignatureAlgorithm, err
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("json validation error: %s", err)
+		return nil, x509.UnknownSignatureAlgorithm, err
 	}
 	defer resp.Body.Close()
 
 	jwks := &jose.JsonWebKeySet{}
 	err = json.Unmarshal(body, jwks)
 	if err != nil {
-		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("json validation error c: %s", err)
-	}
-
-	// Get desired key from JWKS
-	key := jwks.Key(kid)[0]
-	if !key.Valid() {
-		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("invalid JWKS key")
-	}
-
-	publicKey, signingAlgorithm, err := GetPublicKeyFromX509Certificate(key.Certificates[0])
-	if err != nil {
 		return nil, x509.UnknownSignatureAlgorithm, err
 	}
 
-	// Store value in cache
+	publicKey, signingAlgorithm, err := GetPublicKeyFromJsonWebKeySet(jwks, kid)
+
 	lruCache.Add(cacheKey, &jwksCacheValue{
 		SigningAlgorithm: signingAlgorithm,
 		Data:             publicKey,
@@ -155,8 +145,18 @@ func GetPrivateKeyFromPem(privateKeyPemData []byte) (interface{}, error){
 	}
 }
 
-func GetPublicKeyFromX509Certificate(cert *x509.Certificate) (interface{}, x509.SignatureAlgorithm, error){
-	return cert.PublicKey, cert.SignatureAlgorithm, nil
+
+func GetPublicKeyFromJsonWebKeySet(jwks *jose.JsonWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
+	key := jwks.Key(kid)[0]
+	if !key.Valid() {
+		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("invalid JWKS key")
+	}
+
+	if len(key.Certificates) > 0 {
+		return key.Key, key.Certificates[0].SignatureAlgorithm, nil
+	} else {
+		return key.Key, x509.UnknownSignatureAlgorithm, nil
+	}
 }
 
 func GetPublicKeyFromPem(publicKeyPemData []byte) (interface{}, x509.SignatureAlgorithm, error){
@@ -173,7 +173,7 @@ func GetPublicKeyFromPem(publicKeyPemData []byte) (interface{}, x509.SignatureAl
 				return nil, x509.UnknownSignatureAlgorithm, err
 			}
 
-			return GetPublicKeyFromX509Certificate(cert)
+			return cert.PublicKey, cert.SignatureAlgorithm, nil
 		}
 	case "PUBLIC KEY":
 		{
