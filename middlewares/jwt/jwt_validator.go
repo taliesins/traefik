@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/dgrijalva/jwt-go"
+	"net/url"
 )
 
 // Authenticator is a middleware that provides HTTP basic and digest authentication
@@ -39,7 +40,6 @@ func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*Jw
 func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
-			//Get alg to use
 			algHeader, ok := token.Header["alg"]
 			if !ok{
 				return nil, fmt.Errorf("Cannot get alg to use")
@@ -104,7 +104,19 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 				if config.JwksAddress != "" {
 					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
 				} else {
-					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.Issuer)
+					wellKnownUri, err := url.Parse(".well-known/openid-configuration")
+					if err != nil {
+						return nil, err
+					}
+
+					openIdConnectDiscoveryUri, err := url.Parse(config.Issuer)
+					if err != nil {
+						return nil, err
+					}
+
+					openIdConnectDiscoveryUri = openIdConnectDiscoveryUri.ResolveReference(wellKnownUri)
+
+					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, openIdConnectDiscoveryUri.String())
 				}
 
 				if err != nil {

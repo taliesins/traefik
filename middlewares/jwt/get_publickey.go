@@ -17,7 +17,7 @@ import (
 
 var lruCache *lru.Cache
 
-type wellKnownOpenIdConfigurationCacheValue struct {
+type openIdConnectDiscoveryCacheValue struct {
 	JwksUri string
 }
 
@@ -35,18 +35,16 @@ func init() {
 	lruCache = l
 }
 
-func GetJwksUri(issuer string) (jwksUri string, err error) {
-	wellKnownOpenIdConfigurationUri := fmt.Sprintf("%s.well-known/openid-configuration", issuer)
-
+func GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string) (jwksUri string, err error) {
 	// Try to get and return existing entry from cache. If cache is expired,
 	// it will try proceed with rest of the function call
-	cached, ok := lruCache.Get(wellKnownOpenIdConfigurationUri)
+	cached, ok := lruCache.Get(openIdConnectDiscoveryUri)
 	if ok {
-		jwksUri := cached.(*wellKnownOpenIdConfigurationCacheValue).JwksUri
+		jwksUri := cached.(*openIdConnectDiscoveryCacheValue).JwksUri
 		return jwksUri, nil
 	}
 
-	resp, err := http.Get(wellKnownOpenIdConfigurationUri)
+	resp, err := http.Get(openIdConnectDiscoveryUri)
 	if err != nil {
 		return "", fmt.Errorf("json validation error: %s", err)
 	}
@@ -69,15 +67,15 @@ func GetJwksUri(issuer string) (jwksUri string, err error) {
 		return "", fmt.Errorf("json does not contain jwks_uri: %s", err)
 	}
 
-	lruCache.Add(wellKnownOpenIdConfigurationUri, &wellKnownOpenIdConfigurationCacheValue{
+	lruCache.Add(openIdConnectDiscoveryUri, &openIdConnectDiscoveryCacheValue{
 		JwksUri: jwksUri,
 	})
 
 	return jwksUri, nil
 }
 
-func GetPublicKeyFromWellKnownUri(kid string, expectedIssuer string) (interface{}, x509.SignatureAlgorithm, error) {
-	explicitJwksUri, err := GetJwksUri(expectedIssuer)
+func GetPublicKeyFromOpenIdConnectDiscoveryUri(kid string, openIdConnectDiscoveryUri string) (interface{}, x509.SignatureAlgorithm, error) {
+	explicitJwksUri, err := GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri)
 	if err != nil {
 		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("unable to retrieve jwks uri: %s", err)
 	}
@@ -118,7 +116,7 @@ func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.Sign
 		return nil, x509.UnknownSignatureAlgorithm, err
 	}
 
-	publicKey, signingAlgorithm, err := GetPublicKeyFromJsonWebKeySet(jwks, kid)
+	publicKey, signingAlgorithm, err := GetPublicKeyFromJwks(jwks, kid)
 
 	lruCache.Add(cacheKey, &jwksCacheValue{
 		SigningAlgorithm: signingAlgorithm,
@@ -145,8 +143,7 @@ func GetPrivateKeyFromPem(privateKeyPemData []byte) (interface{}, error){
 	}
 }
 
-
-func GetPublicKeyFromJsonWebKeySet(jwks *jose.JsonWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
+func GetPublicKeyFromJwks(jwks *jose.JsonWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
 	key := jwks.Key(kid)[0]
 	if !key.Valid() {
 		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("invalid JWKS key")
