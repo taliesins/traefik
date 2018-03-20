@@ -8,6 +8,8 @@ import (
 	"fmt"
 
 	"github.com/dgrijalva/jwt-go"
+	"net/http"
+	"strings"
 )
 
 // Authenticator is a middleware that provides HTTP basic and digest authentication
@@ -38,6 +40,30 @@ func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*Jw
 
 func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
+		Extractor: func(r *http.Request) (token string, err error) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader != "" {
+				authHeaderParts := strings.Split(authHeader, " ")
+				if len(authHeaderParts) == 2 && strings.ToLower(authHeaderParts[0]) == "bearer" {
+					token = authHeaderParts[1]
+					return token, nil
+				}
+			}
+
+			query := r.URL.Query()
+
+			token = query.Get("auth_code")
+			if token != "" {
+				return token, nil
+			}
+
+			token = query.Get("id_token")
+			if token != "" {
+				return token, nil
+			}
+
+			return "", nil
+		},
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
 			algHeader, ok := token.Header["alg"]
 			if !ok{
