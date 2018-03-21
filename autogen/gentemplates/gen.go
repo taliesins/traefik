@@ -936,6 +936,7 @@ var _templatesKubernetesTmpl = []byte(`[backends]
       audience = "{{ $frontend.Jwt.Audience }}"
       jwksAddress = "{{ $frontend.Jwt.JwksAddress }}"
       oidcDiscoveryAddress = "{{ $frontend.Jwt.OidcDiscoveryAddress }}"
+      ssoAddressTemplate = "{{ $frontend.Jwt.SsoAddressTemplate }}"
       publicKey = "{{ $frontend.Jwt.PublicKey }}"
       clientSecret = "{{ $frontend.Jwt.ClientSecret }}"
     {{end}}

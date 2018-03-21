@@ -257,7 +257,7 @@ func fwdAuthTLS(cert, key string, insecure bool) func(*types.Forward) {
 	}
 }
 
-func jwtAuth(issuer, audience, jwksAddress, oidcDiscoveryAddress, publicKey, clientSecret string) func(*types.Frontend) {
+func jwtAuth(issuer, audience, jwksAddress, oidcDiscoveryAddress, publicKey, clientSecret, ssoAddressTemplate string) func(*types.Frontend) {
 	return func(f *types.Frontend) {
 		f.Jwt = &types.Jwt{
 			Issuer:               issuer,
@@ -266,6 +266,7 @@ func jwtAuth(issuer, audience, jwksAddress, oidcDiscoveryAddress, publicKey, cli
 			OidcDiscoveryAddress: oidcDiscoveryAddress,
 			ClientSecret:         clientSecret,
 			PublicKey:            publicKey,
+			SsoAddressTemplate:   ssoAddressTemplate,
 		}
 	}
 }

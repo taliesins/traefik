@@ -183,7 +183,7 @@ type Frontend struct {
 	PassHostHeader       bool                  `json:"passHostHeader,omitempty"`
 	PassTLSCert          bool                  `json:"passTLSCert,omitempty"`
 	Priority             int                   `json:"priority"`
-	Jwt					 *Jwt				   `json:"jwt,omitempty"`
+	Jwt                  *Jwt                  `json:"jwt,omitempty"`
 	WhitelistSourceRange []string              `json:"whitelistSourceRange,omitempty"` // Deprecated
 	WhiteList            *WhiteList            `json:"whiteList,omitempty"`
 	Headers              *Headers              `json:"headers,omitempty"`
@@ -219,7 +219,8 @@ type Jwt struct {
 	JwksAddress          string `json:"jwksAddress,omitempty"`
 	OidcDiscoveryAddress string `json:"oidcDiscoveryAddress,omitempty"`
 	ClientSecret         string `json:"clientSecret,omitempty"`
-	PublicKey            string `json:"cert,omitempty"`
+	PublicKey            string `json:"publicKey,omitempty"`
+	SsoAddressTemplate   string `json:"ssoAddressTemplate,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.

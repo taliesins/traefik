@@ -266,7 +266,7 @@ func (p *Provider) loadIngresses(k8sClient Client) (*types.Configuration, error)
 						Routes:               make(map[string]types.Route),
 						Priority:             priority,
 						BasicAuth:            basicAuthCreds,
-						Jwt: 				  jwt,
+						Jwt:                  jwt,
 						WhiteList:      getWhiteList(i),
 						Redirect:       getFrontendRedirect(i, baseName, pa.Path),
 						EntryPoints:    entryPoints,
@@ -605,24 +605,31 @@ func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt
 	audience := getStringValue(i.Annotations, annotationKubernetesAuthJwtAudience, "")
 	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtJwksAddress, "")
 	oidcDiscoveryAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtOidcDiscoveryAddress, "")
+	ssoAddressTemplate := getStringValue(i.Annotations, annotationKubernetesAuthJwtSsoAddressTemplate, "")
 	publicKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtPublicKey, "")
 	clientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
+
 
 	jwt := types.Jwt{
 		Issuer:               issuer,
 		Audience:             audience,
 		JwksAddress:          jwksAddress,
 		OidcDiscoveryAddress: oidcDiscoveryAddress,
+		SsoAddressTemplate:   ssoAddressTemplate,
 		PublicKey:            publicKey,
-		ClientSecret:         "",
+		ClientSecret:         clientSecretKey,
 	}
 
-	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && publicKey == "" && clientSecretKey == ""  {
+	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && publicKey == "" && clientSecretKey == "" {
 		return nil, nil
 	}
 
-	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.JwksAddress == "" && jwt.OidcDiscoveryAddress == "" && jwt.Audience != "" {
-		return nil, fmt.Errorf("annotation %v or %v or %v or %v or v% must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer,annotationKubernetesAuthJwtPublicKey , annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtIssuer)
+	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.OidcDiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtPublicKey, annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtAudience)
+	}
+
+	if jwt.Issuer == "" && jwt.OidcDiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.SsoAddressTemplate != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtSsoAddressTemplate)
 	}
 
 	if clientSecretKey == "" {

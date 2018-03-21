@@ -1097,7 +1097,6 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
 			iAnnotation(annotationKubernetesAuthJwtOidcDiscoveryAddress, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration"),
 			iRules(
 				iRule(
@@ -1107,12 +1106,21 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
 			iAnnotation(annotationKubernetesAuthJwtJwksAddress, "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys"),
 			iRules(
 				iRule(
 					iHost("jwt-jwks-uri"),
 					iPaths(onePath(iPath("/jwks-uri"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthJwtSsoAddressTemplate, "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+			iRules(
+				iRule(
+					iHost("jwt-sso-address-template"),
+					iPaths(onePath(iPath("/sso-address-template"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
@@ -1422,6 +1430,12 @@ rateset:
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
+			backend("jwt-sso-address-template/sso-address-template",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
 			backend("redirect/https",
 				servers(
 					server("http://example.com", weight(1)),
@@ -1537,38 +1551,45 @@ rateset:
 			),
 			frontend("jwt-shared-secret/shared-secret",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "", "myUser:myEncodedPW"),
+				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", ""),
 				routes(
 					route("/shared-secret", "PathPrefix:/shared-secret"),
 					route("jwt-shared-secret", "Host:jwt-shared-secret")),
 			),
 			frontend("jwt-public-key/public-key",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "publicKey", ""),
+				jwtAuth("", "", "", "", "publicKey", "", ""),
 				routes(
 					route("/public-key", "PathPrefix:/public-key"),
 					route("jwt-public-key", "Host:jwt-public-key")),
 			),
 			frontend("jwt-issuer-uri/issuer-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", ""),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", ""),
 				routes(
 					route("/issuer-uri", "PathPrefix:/issuer-uri"),
 					route("jwt-issuer-uri", "Host:jwt-issuer-uri")),
 			),
 			frontend("jwt-oidc-discovery-uri/oidc-discovery-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", "", ""),
+				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", "", "", ""),
 				routes(
 					route("/oidc-discovery-uri", "PathPrefix:/oidc-discovery-uri"),
 					route("jwt-oidc-discovery-uri", "Host:jwt-oidc-discovery-uri")),
 			),
 			frontend("jwt-jwks-uri/jwks-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", ""),
+				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", ""),
 				routes(
 					route("/jwks-uri", "PathPrefix:/jwks-uri"),
 					route("jwt-jwks-uri", "Host:jwt-jwks-uri")),
+			),
+			frontend("jwt-sso-address-template/sso-address-template",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+				routes(
+					route("/sso-address-template", "PathPrefix:/sso-address-template"),
+					route("jwt-sso-address-template", "Host:jwt-sso-address-template")),
 			),
 			frontend("redirect/https",
 				passHostHeader(),

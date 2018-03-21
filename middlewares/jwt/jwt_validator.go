@@ -10,9 +10,9 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"net/http"
 	"strings"
+	"text/template"
 )
 
-// Authenticator is a middleware that provides HTTP basic and digest authentication
 type JwtValidator struct {
 	Handler negroni.Handler
 }
@@ -25,8 +25,13 @@ type tracingJwtValidator struct {
 
 func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*JwtValidator, error) {
 	jwtValidator := JwtValidator{}
+	jwtHandler, err := createJwtHandler(config)
+	if err != nil {
+		return nil, err
+	}
+
 	tracingJwtValidator := tracingJwtValidator{}
-	tracingJwtValidator.handler = createAuthJwtHandler(config)
+	tracingJwtValidator.handler = jwtHandler
 	tracingJwtValidator.name = "Auth Jwt"
 	tracingJwtValidator.clientSpanKind = false
 
@@ -38,8 +43,88 @@ func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*Jw
 	return &jwtValidator, nil
 }
 
-func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
+func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
+	var err error
+
+	//Redirect url for SSO
+	var ssoRedirectUrlTemplate *template.Template
+	if config.SsoAddressTemplate == "" {
+		ssoRedirectUrlTemplate, err = getSsoRedirectUrlTemplate(config.SsoAddressTemplate)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ssoRedirectUrlTemplate = nil
+	}
+
+	//Standard client secret Jwt validation
+	var clientSecret []byte
+	if config.ClientSecret != "" {
+		clientSecret = []byte(config.ClientSecret)
+	} else {
+		clientSecret = nil
+	}
+
+	//Standard certificate Jwt validation
+	var publicKey interface{}
+	if config.PublicKey != "" {
+		publicKey, _, err = GetPublicKeyFromFileOrContent(config.PublicKey)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		publicKey = nil
+	}
+
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
+		ErrorHandler:func(w http.ResponseWriter, r *http.Request, errorMessage string){
+			if ssoRedirectUrlTemplate == nil {
+				http.Error(w, errorMessage, http.StatusUnauthorized)
+				return
+			}
+
+			if strings.HasPrefix(r.URL.RawPath, callbackPath)  {
+				query := r.URL.Query()
+
+				//Anonymous user going directly to redirect url, so ignore it
+				redirectUrl := query.Get(redirectUriQuerystringParameterName)
+				if redirectUrl == "" {
+					http.Error(w, errorMessage, http.StatusUnauthorized)
+					return
+				}
+
+				//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
+				idTokenInBookmarkRedirectPage, err := renderIdTokenInBookmarkRedirectPageTemplate(redirectUrl, sessionCookieName, idTokenBookmarkParameterName)
+				if err != nil {
+					http.Error(w, errorMessage, http.StatusUnauthorized)
+					return
+				} else {
+					w.Header().Set("Content-Type", "text/html")
+					w.WriteHeader(http.StatusOK)
+					fmt.Fprintf(w, idTokenInBookmarkRedirectPage)
+				}
+			}
+
+			callbackRedirectUrl, err := renderCallbackRedirectUrlTemplate(callbackRedirectUrlTemplate, r.Host, callbackPath, redirectUriQuerystringParameterName, r.URL.String())
+			if err != nil {
+				http.Error(w, errorMessage, http.StatusUnauthorized)
+				return
+			}
+
+			ssoRedirectUrl, err := renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate, callbackRedirectUrl)
+			if err != nil {
+				http.Error(w, errorMessage, http.StatusUnauthorized)
+				return
+			}
+
+			redirectToSingleSignOnPage, err := renderRedirectToSsoPageTemplate(ssoRedirectUrl, errorMessage)
+			if err != nil {
+				http.Error(w, errorMessage, http.StatusUnauthorized)
+				return
+			}
+
+			http.Error(w, redirectToSingleSignOnPage, http.StatusUnauthorized)
+		},
 		Extractor: func(r *http.Request) (token string, err error) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader != "" {
@@ -52,14 +137,22 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 
 			query := r.URL.Query()
 
-			token = query.Get("auth_code")
+			token = query.Get("id_token")
 			if token != "" {
 				return token, nil
 			}
 
-			token = query.Get("id_token")
-			if token != "" {
-				return token, nil
+			sessionCookie, err := r.Cookie(sessionCookieName)
+			if err == nil {
+				token = sessionCookie.Value
+				if token != "" {
+					return token, nil
+				}
+			}
+
+			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
+			if strings.HasPrefix(r.URL.RawPath, callbackPath) {
+				//TODO: SSO posts back the id_token
 			}
 
 			return "", nil
@@ -80,24 +173,16 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 				kid = kidHeader.(string)
 			}
 
-			if config.ClientSecret != "" && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
-				//Standard client Secret Jwt Validation
-				clientSecret := []byte(config.ClientSecret)
+			if clientSecret != nil && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
 				return clientSecret, nil
 			}
 
-			if config.PublicKey != "" && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.OidcDiscoveryAddress == "")) {
-				//Standard certificate Jwt validation
-				publicKey, _, err := GetPublicKeyFromFileOrContent(config.PublicKey)
-				if err != nil {
-					return nil, err
-				}
-
+			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.OidcDiscoveryAddress == "")) {
 				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
 
-			// If kid exists then get the public key from the JWT's issuer
+			// If kid exists then we using dynamic public keys
 			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.OidcDiscoveryAddress != "") {
 				claims := token.Claims.(jwt.MapClaims)
 
@@ -111,12 +196,10 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 					aud = claims["aud"].(string)
 				}
 
-				// Get iss from JWT and validate against desired iss
 				if config.Issuer != "" && iss != config.Issuer {
 					return nil, fmt.Errorf("Cannot validate iss claim")
 				}
 
-				// Get audience from JWT and validate against desired audience
 				if config.Audience != "" && aud != config.Audience {
 					return nil, fmt.Errorf("Cannot validate audience claim")
 				}
@@ -126,6 +209,7 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 					publicKey                 interface{}
 				)
 
+				//public keys are calculated JIT as they are dynamic
 				if config.JwksAddress != "" {
 					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
 				} else if config.OidcDiscoveryAddress != "" {
@@ -146,5 +230,37 @@ func createAuthJwtHandler(config *types.Jwt) (negroni.HandlerFunc) {
 		},
 	})
 
-	return jwtMiddleware.HandlerWithNext
+	jwtHandlerFunc := func (w http.ResponseWriter, r *http.Request, next http.HandlerFunc){
+		jwtMiddleware.CheckJWT(w, r)
+
+		if err == nil && strings.HasPrefix(r.URL.RawPath, callbackPath) {
+			//SSO might have redirected back here and supplied id_token so we can now redirect to redirct_uri
+			query := r.URL.Query()
+
+			//Logged in user going directly to redirect url, so ignore it
+			redirectUrl := query.Get(redirectUriQuerystringParameterName)
+			if redirectUrl == "" {
+				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
+
+			//Redirect user to the uri the triggered authentication request
+			/*
+			When logging in with SSO we would loose any POST data, so its safer to assume that a login to run a GET vs a POST
+
+			https://www.pmg.com/blog/301-302-303-307-many-redirects/
+			303 See Other - The response to the request can be found under another URI using a GET method. When received in response to a PUT, it should be assumed that the server has received the data and the redirect should be issued with a separate GET message.
+			*/
+			http.Redirect(w, r, redirectUrl, http.StatusSeeOther)
+
+			return
+		}
+
+		// If there was an error, do not call next.
+		if err == nil && next != nil {
+			next(w, r)
+		}
+	}
+
+	return jwtHandlerFunc, nil
 }
