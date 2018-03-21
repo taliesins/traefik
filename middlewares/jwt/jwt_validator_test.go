@@ -22,6 +22,7 @@ import (
 	"path"
 	"reflect"
 	"runtime"
+	"net/url"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -71,7 +72,7 @@ func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *
 	return nil
 }
 
-func runMiddleWareWithClientSecretSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) (*http.Response, error) {
+func runMiddleWareWithClientSecretSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod, skipSigning bool) (*http.Response, error) {
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
 	if err != nil {
 		return nil, err
@@ -85,9 +86,12 @@ func runMiddleWareWithClientSecretSigning(t *testing.T, handlerFunc func(http.Re
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	err = signHeaderWithClientSecret(req, clientSecret, claims, tokenMethod)
-	if err != nil {
-		return nil, err
+
+	if !skipSigning {
+		err = signHeaderWithClientSecret(req, clientSecret, claims, tokenMethod)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return client.Do(req)
@@ -103,7 +107,7 @@ func runTestWithClientSecretSuccess(t *testing.T, clientSecret string, tokenMeth
 		ClientSecret: clientSecret,
 	}
 
-	res, err := runMiddleWareWithClientSecretSigning(t, handlerFunc, jwtConfiguration, clientSecret, claims, tokenMethod)
+	res, err := runMiddleWareWithClientSecretSigning(t, handlerFunc, jwtConfiguration, clientSecret, claims, tokenMethod, false)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
@@ -123,7 +127,7 @@ func runTestWithClientSecretFailure(t *testing.T, serverClientSecret string, cli
 		ClientSecret: serverClientSecret,
 	}
 
-	res, err := runMiddleWareWithClientSecretSigning(t, handlerFunc, jwtConfiguration, clientClientSecret, claims, tokenMethod)
+	res, err := runMiddleWareWithClientSecretSigning(t, handlerFunc, jwtConfiguration, clientClientSecret, claims, tokenMethod, false)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
@@ -180,7 +184,7 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 	return nil
 }
 
-func runMiddleWareWithCertificateSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod) (*http.Response, error) {
+func runMiddleWareWithCertificateSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod, skipSigning bool) (*http.Response, error) {
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
 	if err != nil {
 		return nil, err
@@ -194,9 +198,11 @@ func runMiddleWareWithCertificateSigning(t *testing.T, handlerFunc func(http.Res
 
 	client := &http.Client{}
 	req := testhelpers.MustNewRequest(http.MethodGet, ts.URL, nil)
-	err = signHeaderWithCertificate(req, certificate, signingMethod, kid, claims, tokenMethod)
-	if err != nil {
-		return nil, err
+	if !skipSigning {
+		err = signHeaderWithCertificate(req, certificate, signingMethod, kid, claims, tokenMethod)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return client.Do(req)
@@ -240,7 +246,7 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		PublicKey: string(certContent),
 	}
 
-	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod)
+	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
@@ -287,7 +293,7 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 		PublicKey: string(certContent),
 	}
 
-	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod)
+	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
@@ -402,7 +408,7 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		jwtConfiguration.JwksAddress = fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath)
 	}
 
-	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod)
+	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
@@ -526,4 +532,162 @@ func TestWithRS256UsingOpenIdConnectDiscoveryUriSuccess(t *testing.T) {
 
 func TestWithRS256UsingIssuerUriSuccess(t *testing.T) {
 	runTestWithDiscoverySuccess(t, jwt.SigningMethodRS256, "signing/rsa", false, false, true, TokenMethodAuthorizationHeader)
+}
+
+func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/rsa")
+
+	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
+	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
+		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
+	}
+
+	privateKeyPath := fmt.Sprintf("%s.key", certPath)
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(publicKeyPath),
+		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
+	}
+
+	if !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if err != nil {
+		panic(err)
+	}
+
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.RequestURI == oidcDiscoveryUriPath {
+			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if r.RequestURI == jwksUriPath {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+	defer jwksServer.Close()
+
+	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	}
+
+	kid := "0"
+	claims := &jwt.StandardClaims{
+		Issuer: jwksServer.URL,
+	}
+	jwtConfiguration := &types.Jwt{}
+	jwtConfiguration.Issuer = jwksServer.URL
+
+	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.Equal(t, "Required authorization token not found\n", string(body), "they should be equal")
+}
+
+func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/rsa")
+
+	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
+	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
+		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
+	}
+
+	privateKeyPath := fmt.Sprintf("%s.key", certPath)
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(publicKeyPath),
+		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
+	}
+
+	if !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if err != nil {
+		panic(err)
+	}
+
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.RequestURI == oidcDiscoveryUriPath {
+			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if r.RequestURI == jwksUriPath {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+	defer jwksServer.Close()
+
+	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
+	}
+
+	kid := "0"
+	claims := &jwt.StandardClaims{
+		Issuer: jwksServer.URL,
+	}
+	jwtConfiguration := &types.Jwt{}
+	jwtConfiguration.Issuer = jwksServer.URL
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+
+	res, err := runMiddleWareWithCertificateSigning(t, handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+
+	var scheme string
+	if res.Request.TLS != nil {
+		scheme = "https"
+	} else {
+		scheme = "http"
+	}
+
+	if res.Request.URL.Path == ""{
+		res.Request.URL.Path = "/"
+	}
+	redirectUrl := res.Request.URL.String()
+
+	expectedReturnUrl := url.QueryEscape(fmt.Sprintf("%s://%s%s?%s=%s", scheme, res.Request.Host, callbackPath, redirectUriQuerystringParameterName, url.QueryEscape(redirectUrl)))
+
+	assert.Equal(t, fmt.Sprintf("\nRequired authorization token not found\n<javascript>\nwindow.location = 'https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri=%s&scope=openid&response_type=id_token&prompt=login'\n</javascript>\n<noscript>\nPlease sign in at https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri=%s&scope=openid&response_type=id_token&prompt=login\n</noscript>\n\n", expectedReturnUrl, expectedReturnUrl), string(body), "they should be equal")
 }

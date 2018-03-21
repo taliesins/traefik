@@ -4,38 +4,45 @@ import (
 	"bytes"
 	"net/url"
 	"text/template"
+	"net/http"
 )
-
-type callbackRedirectUrlTemplateOptions struct {
-	Host                                string
-	Path                                string
-	RedirectUriQuerystringParameterName string
-	RedirectUrl                         string
-}
 
 var sessionCookieName = "traefik_session"
 var redirectUriQuerystringParameterName = "redirect_uri"
 var idTokenBookmarkParameterName = "id_token"
-var callbackPath = "/traefik/oauth2/callback?"
-var callbackRedirectUrlTemplate = template.Must(template.New("CallbackRedirectUrl").Parse(`https://{{.Host}}{{.Path}}{{.RedirectUriQuerystringParameterName}}={{.RedirectUrl}}`))
+var callbackPath = "/traefik/oauth2/callback"
 
 //var redirectUrlTemplate = `https://{{.Host}}/traefik/oauth2/callback?redirect_uri={{.Url}}`
-func renderCallbackRedirectUrlTemplate(callbackRedirectUrlTemplate *template.Template, host string, path string, redirectUriQuerystringParameterName string, redirectUrl string) (string, error) {
-	encodedRedirectUrl := url.QueryEscape(redirectUrl)
-
-	var callbackRedirectUrlTemplateRendered bytes.Buffer
-	err := callbackRedirectUrlTemplate.Execute(&callbackRedirectUrlTemplateRendered, callbackRedirectUrlTemplateOptions{
-		Host: host,
-		Path: path,
-		RedirectUriQuerystringParameterName: redirectUriQuerystringParameterName,
-		RedirectUrl:                         encodedRedirectUrl,
-	})
-
-	if err != nil {
-		return "", err
+func renderCallbackRedirectUrlTemplate(r *http.Request, callbackPath string, redirectUriQuerystringParameterName string) (string, error) {
+	urlClone := &url.URL{
+		Scheme: r.URL.Scheme,
+		Opaque: r.URL.Opaque,
+		User: r.URL.User,
+		Host: r.URL.Host,
+		Path: r.URL.Path,
 	}
 
-	return string(callbackRedirectUrlTemplateRendered.Bytes()), nil
+	if urlClone.Host == ""{
+		urlClone.Host = r.Host
+	}
+
+	if urlClone.Scheme == "" {
+		if r.TLS != nil {
+			urlClone.Scheme =  "https"
+		} else {
+			urlClone.Scheme =  "http"
+		}
+	}
+
+	redirectUrl := urlClone.String()
+
+	urlClone.Path = callbackPath
+
+	q := urlClone.Query()
+	q.Set(redirectUriQuerystringParameterName, redirectUrl)
+	urlClone.RawQuery = q.Encode()
+
+	return urlClone.String(), nil
 }
 
 type ssoRedirectUrlTemplateOptions struct {

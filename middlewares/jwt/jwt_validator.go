@@ -48,7 +48,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 	//Redirect url for SSO
 	var ssoRedirectUrlTemplate *template.Template
-	if config.SsoAddressTemplate == "" {
+	if config.SsoAddressTemplate != "" {
 		ssoRedirectUrlTemplate, err = getSsoRedirectUrlTemplate(config.SsoAddressTemplate)
 		if err != nil {
 			return nil, err
@@ -83,7 +83,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return
 			}
 
-			if strings.HasPrefix(r.URL.RawPath, callbackPath)  {
+			if strings.HasPrefix(r.URL.Path, callbackPath)  {
 				query := r.URL.Query()
 
 				//Anonymous user going directly to redirect url, so ignore it
@@ -105,7 +105,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				}
 			}
 
-			callbackRedirectUrl, err := renderCallbackRedirectUrlTemplate(callbackRedirectUrlTemplate, r.Host, callbackPath, redirectUriQuerystringParameterName, r.URL.String())
+			callbackRedirectUrl, err := renderCallbackRedirectUrlTemplate(r, callbackPath, redirectUriQuerystringParameterName)
 			if err != nil {
 				http.Error(w, errorMessage, http.StatusUnauthorized)
 				return
@@ -151,7 +151,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			}
 
 			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
-			if strings.HasPrefix(r.URL.RawPath, callbackPath) {
+			if strings.HasPrefix(r.URL.Path, callbackPath) {
 				//TODO: SSO posts back the id_token
 			}
 
@@ -231,9 +231,9 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	})
 
 	jwtHandlerFunc := func (w http.ResponseWriter, r *http.Request, next http.HandlerFunc){
-		jwtMiddleware.CheckJWT(w, r)
+		err := jwtMiddleware.CheckJWT(w, r)
 
-		if err == nil && strings.HasPrefix(r.URL.RawPath, callbackPath) {
+		if err == nil && strings.HasPrefix(r.URL.Path, callbackPath) {
 			//SSO might have redirected back here and supplied id_token so we can now redirect to redirct_uri
 			query := r.URL.Query()
 
