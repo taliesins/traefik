@@ -99,9 +99,8 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 					http.Error(w, errorMessage, http.StatusUnauthorized)
 					return
 				} else {
-					w.Header().Set("Content-Type", "text/html")
-					w.WriteHeader(http.StatusOK)
-					fmt.Fprintf(w, idTokenInBookmarkRedirectPage)
+					http.Error(w, idTokenInBookmarkRedirectPage, http.StatusUnauthorized)
+					return
 				}
 			}
 
