@@ -7,21 +7,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	traefiktls "github.com/containous/traefik/tls"
-	"github.com/containous/traefik/middlewares/tracing"
-	"github.com/containous/traefik/testhelpers"
-	"github.com/containous/traefik/types"
-	"github.com/stretchr/testify/assert"
-	"github.com/urfave/negroni"
-	"github.com/dgrijalva/jwt-go"
-	"runtime"
-	"path"
-	"gopkg.in/square/go-jose.v1"
-	"encoding/json"
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"reflect"
+	"encoding/json"
+	"github.com/containous/traefik/middlewares/tracing"
+	"github.com/containous/traefik/testhelpers"
+	traefiktls "github.com/containous/traefik/tls"
+	"github.com/containous/traefik/types"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/stretchr/testify/assert"
+	"github.com/urfave/negroni"
+	"gopkg.in/square/go-jose.v1"
 	"os"
+	"path"
+	"reflect"
+	"runtime"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -32,9 +32,10 @@ type TokenMethod int
 const (
 	TokenMethodAuthorizationHeader TokenMethod = 1 + iota
 	TokenMethodQuerystring
+	TokenMethodCookie
 )
 
-func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) error{
+func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) error {
 	signingKey := []byte(clientSecret)
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -44,7 +45,7 @@ func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *
 		return err
 	}
 
-	switch (tokenMethod) {
+	switch tokenMethod {
 	case TokenMethodAuthorizationHeader:
 		{
 			req.Header.Set(defaultAuthorizationHeaderName, fmt.Sprintf("bearer %v", signedToken))
@@ -55,12 +56,22 @@ func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *
 			q.Add(idTokenQuerystringParameterName, signedToken)
 			req.URL.RawQuery = q.Encode()
 		}
+	case TokenMethodCookie:
+		{
+			cookie := &http.Cookie{
+				Name:  sessionCookieName,
+				Value: signedToken,
+				//Path:"", //TODO: should we be validating the path?
+				//Domain:"", //TODO: should we be validating the domain
+			}
+			req.AddCookie(cookie)
+		}
 	}
 
 	return nil
 }
 
-func runMiddleWareWithClientSecretSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, clientSecret string , claims *jwt.StandardClaims, tokenMethod TokenMethod)(*http.Response, error){
+func runMiddleWareWithClientSecretSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) (*http.Response, error) {
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
 	if err != nil {
 		return nil, err
@@ -143,7 +154,7 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 		return err
 	}
 
-	switch (tokenMethod) {
+	switch tokenMethod {
 	case TokenMethodAuthorizationHeader:
 		{
 			req.Header.Set(defaultAuthorizationHeaderName, fmt.Sprintf("bearer %v", signedToken))
@@ -154,12 +165,22 @@ func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certif
 			q.Add(idTokenQuerystringParameterName, signedToken)
 			req.URL.RawQuery = q.Encode()
 		}
+	case TokenMethodCookie:
+		{
+			cookie := &http.Cookie{
+				Name:  sessionCookieName,
+				Value: signedToken,
+				//Path:"", //TODO: should we be validating the path?
+				//Domain:"", //TODO: should we be validating the domain
+			}
+			req.AddCookie(cookie)
+		}
 	}
 
 	return nil
 }
 
-func runMiddleWareWithCertificateSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod)(*http.Response, error){
+func runMiddleWareWithCertificateSigning(t *testing.T, handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod) (*http.Response, error) {
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
 	if err != nil {
 		return nil, err
@@ -197,16 +218,16 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
 	}
 
-	if  !certificate.CertFile.IsPath() {
+	if !certificate.CertFile.IsPath() {
 		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
 	}
 
-	if  !certificate.KeyFile.IsPath() {
+	if !certificate.KeyFile.IsPath() {
 		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
 	}
 
 	certContent, err := certificate.CertFile.Read()
-	if err != nil{
+	if err != nil {
 		panic(err)
 	}
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
@@ -244,16 +265,16 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
 	}
 
-	if  !certificate.CertFile.IsPath() {
+	if !certificate.CertFile.IsPath() {
 		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
 	}
 
-	if  !certificate.KeyFile.IsPath() {
+	if !certificate.KeyFile.IsPath() {
 		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
 	}
 
 	certContent, err := certificate.CertFile.Read()
-	if err != nil{
+	if err != nil {
 		panic(err)
 	}
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +297,7 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 	assert.NotEqual(t, "traefik\n", string(body), "they should not be equal")
 }
 
-func getJsonWebset(certificate *traefiktls.Certificate)(*jose.JsonWebKeySet, error){
+func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JsonWebKeySet, error) {
 	publicKeyPemData, err := certificate.CertFile.Read()
 	if err != nil {
 		return nil, err
@@ -298,7 +319,7 @@ func getJsonWebset(certificate *traefiktls.Certificate)(*jose.JsonWebKeySet, err
 	}
 
 	jsonWebKeySet := &jose.JsonWebKeySet{
-		Keys:[]jose.JsonWebKey{
+		Keys: []jose.JsonWebKey{
 			{
 				Key:       publicKey,
 				KeyID:     "0",
@@ -327,21 +348,21 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
 	}
 
-	if  !certificate.CertFile.IsPath() {
+	if !certificate.CertFile.IsPath() {
 		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
 	}
 
-	if  !certificate.KeyFile.IsPath() {
+	if !certificate.KeyFile.IsPath() {
 		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
 	}
 
 	jsonWebKeySet, err := getJsonWebset(certificate)
-	if  err != nil {
+	if err != nil {
 		panic(err)
 	}
 
 	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if  err != nil {
+	if err != nil {
 		panic(err)
 	}
 
@@ -351,10 +372,10 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
 	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if (r.RequestURI == oidcDiscoveryUriPath) {
+		if r.RequestURI == oidcDiscoveryUriPath {
 			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
 			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if (r.RequestURI == jwksUriPath) {
+		} else if r.RequestURI == jwksUriPath {
 			w.Write(jsonWebKeySetJson)
 		} else {
 			panic("Don't know how to handle request")
@@ -368,9 +389,9 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 
 	kid := "0"
 	claims := &jwt.StandardClaims{
-		Issuer:jwksServer.URL,
+		Issuer: jwksServer.URL,
 	}
-	jwtConfiguration := &types.Jwt{	}
+	jwtConfiguration := &types.Jwt{}
 	if setIssuer {
 		jwtConfiguration.Issuer = jwksServer.URL
 	}
@@ -407,7 +428,15 @@ func TestWithClientSecretInQuerystringWrongSecretFailure(t *testing.T) {
 	runTestWithClientSecretFailure(t, "mySecret", "mySecretWrong", TokenMethodQuerystring)
 }
 
-func TestWithPublicKeySuccess(t *testing.T) {
+func TestWithClientSecretInCookieSuccess(t *testing.T) {
+	runTestWithClientSecretSuccess(t, "mySecret", TokenMethodCookie)
+}
+
+func TestWithClientSecretInCookieWrongSecretFailure(t *testing.T) {
+	runTestWithClientSecretFailure(t, "mySecret", "mySecretWrong", TokenMethodCookie)
+}
+
+func TestWithPublicKeyInAuthorizationHeaderSuccess(t *testing.T) {
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodES256, "signing/es256", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodES384, "signing/es384", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodES512, "signing/es512", TokenMethodAuthorizationHeader)
@@ -419,7 +448,7 @@ func TestWithPublicKeySuccess(t *testing.T) {
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS512, "signing/rsa", TokenMethodAuthorizationHeader)
 }
 
-func TestWithPublicKeyFailure(t *testing.T) {
+func TestWithPublicKeyInAuthorizationHeaderFailure(t *testing.T) {
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodAuthorizationHeader)
@@ -429,6 +458,54 @@ func TestWithPublicKeyFailure(t *testing.T) {
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
+}
+
+func TestWithPublicKeyInQuerystringSuccess(t *testing.T) {
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES256, "signing/es256", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES384, "signing/es384", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES512, "signing/es512", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS256, "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS384, "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS512, "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS256, "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS384, "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS512, "signing/rsa", TokenMethodQuerystring)
+}
+
+func TestWithPublicKeyInQuerystringFailure(t *testing.T) {
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+}
+
+func TestWithPublicKeyInCookieSuccess(t *testing.T) {
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES256, "signing/es256", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES384, "signing/es384", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodES512, "signing/es512", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS256, "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS384, "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodPS512, "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS256, "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS384, "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeySuccess(t, jwt.SigningMethodRS512, "signing/rsa", TokenMethodCookie)
+}
+
+func TestWithPublicKeyInCookieFailure(t *testing.T) {
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
 }
 
 func TestWithSignedRsaPublicKeySuccess(t *testing.T) {
