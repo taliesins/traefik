@@ -949,6 +949,7 @@ func (s *Server) loadConfig(configurations types.Configurations, globalConfigura
 						if err != nil {
 							log.Errorf("Error creating Jwt Validator: %s", err)
 						} else {
+							log.Info(" Adding jwt middleware for: %s \n  Issuer: %s\n  Audience: %s\n  Issuer: %s\n  ClientSecret: %t\n  PublicKey: %t\n  OidcDiscoveryAddress: %s\n  JwksAddress: %s\n  SsoAddressTemplate: %s", frontendName, frontend.Jwt.Issuer, frontend.Jwt.Audience, frontend.Jwt.ClientSecret != "", frontend.Jwt.PublicKey != "", frontend.Jwt.OidcDiscoveryAddress, frontend.Jwt.JwksAddress, frontend.Jwt.SsoAddressTemplate)
 							n.Use(s.wrapNegroniHandlerWithAccessLog(jwtValidatorMiddleware.Handler, fmt.Sprintf("Jwt Validator for %s", frontendName)))
 						}
 					}
