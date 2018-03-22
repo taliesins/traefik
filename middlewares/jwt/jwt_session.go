@@ -75,6 +75,7 @@ type redirectToSsoPageTemplateOptions struct {
 }
 
 var redirectToSsoPageTemplate = template.Must(template.New("RedirectToSsoPage").Parse(`
+<html><body>
 {{.ErrorMessage}}
 <javascript>
 window.location = '{{.RedirectUrl}}'
@@ -82,6 +83,7 @@ window.location = '{{.RedirectUrl}}'
 <noscript>
 Please sign in at {{.RedirectUrl}}
 </noscript>
+</body></html>
 `))
 
 func renderRedirectToSsoPageTemplate(redirectUrl string, errorMessage string) (string, error) {
@@ -105,6 +107,7 @@ type idTokenInBookmarkRedirectPageTemplateOptions struct {
 }
 
 var idTokenInBookmarkRedirectTemplate = template.Must(template.New("IdTokenInBookmarkRedirectPage").Parse(`
+<html><body>
 <javascript>
 function getBookMarkParameterByName(name, url) {
     if (!url) url = window.location.hash;
@@ -121,6 +124,7 @@ window.location = '{{.RedirectUrl}}'
 <noscript>
 Please change the '#' in the url to '&' and goto link
 </noscript>
+</body></html>
 `))
 
 func renderIdTokenInBookmarkRedirectPageTemplate(redirectUrl string, sessionCookieName string, idTokenBookmarkParameterName string) (string, error) {

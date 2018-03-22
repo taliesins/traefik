@@ -99,6 +99,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 					http.Error(w, errorMessage, http.StatusUnauthorized)
 					return
 				} else {
+					w.Header().Set("Content-Type", "text/html")
 					http.Error(w, idTokenInBookmarkRedirectPage, http.StatusUnauthorized)
 					return
 				}
@@ -122,6 +123,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return
 			}
 
+			w.Header().Set("Content-Type", "text/html")
 			http.Error(w, redirectToSingleSignOnPage, http.StatusUnauthorized)
 		},
 		Extractor: func(r *http.Request) (token string, err error) {
