@@ -99,8 +99,10 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 					http.Error(w, errorMessage, http.StatusUnauthorized)
 					return
 				} else {
-					w.Header().Set("Content-Type", "text/html")
-					http.Error(w, idTokenInBookmarkRedirectPage, http.StatusUnauthorized)
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.Header().Set("X-Content-Type-Options", "nosniff")
+					w.WriteHeader(http.StatusUnauthorized)
+					fmt.Fprintln(w, idTokenInBookmarkRedirectPage)
 					return
 				}
 			}
@@ -123,8 +125,10 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return
 			}
 
-			w.Header().Set("Content-Type", "text/html")
-			http.Error(w, redirectToSingleSignOnPage, http.StatusUnauthorized)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintln(w, redirectToSingleSignOnPage)
 		},
 		Extractor: func(r *http.Request) (token string, err error) {
 			authHeader := r.Header.Get("Authorization")
