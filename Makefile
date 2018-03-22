@@ -127,7 +127,6 @@ run-dev:
 generate-webui: build-webui
 	if [ ! -d "static" ]; then \
 		mkdir -p static; \
-		echo "source is $(CURDIR)/static"
 		docker run --rm -v "$(CURDIR)/static":'/src/static' traefik-webui npm run build; \
 		echo 'For more informations show `webui/readme.md`' > $(CURDIR)/static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md; \
 	fi
