@@ -3,8 +3,10 @@ package jwt
 import (
 	"bytes"
 	"net/url"
-	"html/template"
+	"text/template"
+	htmlTemplate "text/template"
 	"net/http"
+	"strings"
 )
 
 var sessionCookieName = "traefik_session"
@@ -74,13 +76,32 @@ type redirectToSsoPageTemplateOptions struct {
 	ErrorMessage string
 }
 
-var redirectToSsoPageTemplate = template.Must(template.New("RedirectToSsoPage").Parse(`
+var attributeReplacer = strings.NewReplacer(
+	   string(0),    "\uFFFD",
+		"\"",  "&#34;",
+		"'", "&#39;",
+		"+",  "&#43;",
+		"<",  "&lt;",
+		">",  "&gt;",
+	)
+
+var redirectToSsoPageTemplate = template.Must(template.New("RedirectToSsoPage").Funcs(template.FuncMap{
+	"escapeJavascriptVariable": func(textToEscape string) string {
+		return htmlTemplate.JSEscapeString(textToEscape)
+	},
+	"escapeHtml": func(textToEscape string) string {
+		return htmlTemplate.HTMLEscapeString(textToEscape)
+	},
+	"escapeAttribute": func(textToEscape string) string {
+		return attributeReplacer.Replace(textToEscape)
+	},
+}).Parse(`
 <!DOCTYPE html><html><head><title></title></head><body>
 {{.ErrorMessage}}
-<javascript>
-window.location = '{{.RedirectUrl}}'
-</javascript>
-Please sign in at {{.RedirectUrl}}
+<script>
+window.location = '{{ .RedirectUrl | escapeJavascriptVariable }}'
+</script>
+Please sign in at <a href='{{.RedirectUrl | escapeAttribute}}'>{{ .RedirectUrl | escapeHtml}}</a>
 </body></html>
 `))
 
@@ -104,9 +125,13 @@ type idTokenInBookmarkRedirectPageTemplateOptions struct {
 	IdTokenBookmarkParameterName string //id_token
 }
 
-var idTokenInBookmarkRedirectTemplate = template.Must(template.New("IdTokenInBookmarkRedirectPage").Parse(`
+var idTokenInBookmarkRedirectTemplate = template.Must(template.New("IdTokenInBookmarkRedirectPage").Funcs(template.FuncMap{
+	"escapeJavascriptVariable": func(textToEscape string) string {
+		return htmlTemplate.JSEscapeString(textToEscape)
+	},
+}).Parse(`
 <!DOCTYPE html><html><head><title></title></head><body>
-<javascript>
+<script>
 function getBookMarkParameterByName(name, url) {
     if (!url) url = window.location.hash;
     name = name.replace(/[\[\]]/g, "\\$&");
@@ -116,9 +141,9 @@ function getBookMarkParameterByName(name, url) {
     return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
 
-document.cookie = "{{.SessionCookieName}}=" + getBookMarkParameterByName('{{.IdTokenBookmarkParameterName}}') 
-window.location = '{{.RedirectUrl}}'
-</javascript>
+document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}') 
+window.location = '{{ escapeJavascriptVariable .RedirectUrl}}'
+</script>
 Please change the '#' in the url to '&' and goto link
 </body></html>
 `))
