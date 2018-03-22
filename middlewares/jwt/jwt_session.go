@@ -3,7 +3,7 @@ package jwt
 import (
 	"bytes"
 	"net/url"
-	"text/template"
+	"html/template"
 	"net/http"
 )
 
@@ -75,14 +75,12 @@ type redirectToSsoPageTemplateOptions struct {
 }
 
 var redirectToSsoPageTemplate = template.Must(template.New("RedirectToSsoPage").Parse(`
-<html><body>
+<!DOCTYPE html><html><head><title></title></head><body>
 {{.ErrorMessage}}
 <javascript>
 window.location = '{{.RedirectUrl}}'
 </javascript>
-<noscript>
 Please sign in at {{.RedirectUrl}}
-</noscript>
 </body></html>
 `))
 
@@ -107,7 +105,7 @@ type idTokenInBookmarkRedirectPageTemplateOptions struct {
 }
 
 var idTokenInBookmarkRedirectTemplate = template.Must(template.New("IdTokenInBookmarkRedirectPage").Parse(`
-<html><body>
+<!DOCTYPE html><html><head><title></title></head><body>
 <javascript>
 function getBookMarkParameterByName(name, url) {
     if (!url) url = window.location.hash;
@@ -121,9 +119,7 @@ function getBookMarkParameterByName(name, url) {
 document.cookie = "{{.SessionCookieName}}=" + getBookMarkParameterByName('{{.IdTokenBookmarkParameterName}}') 
 window.location = '{{.RedirectUrl}}'
 </javascript>
-<noscript>
 Please change the '#' in the url to '&' and goto link
-</noscript>
 </body></html>
 `))
 

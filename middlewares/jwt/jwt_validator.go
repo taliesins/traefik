@@ -10,7 +10,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"net/http"
 	"strings"
-	"text/template"
+	"html/template"
 )
 
 type JwtValidator struct {
