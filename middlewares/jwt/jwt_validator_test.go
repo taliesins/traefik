@@ -23,7 +23,8 @@ import (
 	"reflect"
 	"runtime"
 	"net/url"
-	"html/template"
+	"regexp"
+	"strings"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -264,7 +265,7 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+	assert.EqualValues(t, "traefik\n", string(body), "they should be equal")
 }
 
 func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, publicKeyRootPath string, privateKeyRootPath string, tokenMethod TokenMethod) {
@@ -387,10 +388,16 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 	jwksUriPath := "/common/discovery/keys"
 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
+			var scheme string
+			if r.TLS != nil {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
+			jwksUri := fmt.Sprintf("%s://%s%s", scheme, r.Host, jwksUriPath)
 			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
 		} else if r.RequestURI == jwksUriPath {
 			w.Write(jsonWebKeySetJson)
@@ -413,7 +420,7 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		jwtConfiguration.Issuer = jwksServer.URL
 	}
 	if setOidcDiscoveryUri {
-		jwtConfiguration.OidcDiscoveryAddress = fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath)
+		jwtConfiguration.DiscoveryAddress = fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath)
 	}
 	if setJwksUri {
 		jwtConfiguration.JwksAddress = fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath)
@@ -426,7 +433,7 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, "traefik\n", string(body), "they should be equal")
+	assert.EqualValues(t, "traefik\n", string(body), "they should be equal")
 }
 
 func TestWithClientSecretInAuthorizationHeaderSuccess(t *testing.T) {
@@ -583,7 +590,7 @@ func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
 	jwksUriPath := "/common/discovery/keys"
 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.RequestURI == oidcDiscoveryUriPath {
 			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
@@ -613,7 +620,8 @@ func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
 
 	body, err := ioutil.ReadAll(res.Body)
-	assert.Equal(t, "Required authorization token not found\n", string(body), "they should be equal")
+	expectedBody := "\n"
+	assert.EqualValues(t, expectedBody, string(body), "they should be equal")
 }
 
 func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
@@ -654,7 +662,7 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	jwksUriPath := "/common/discovery/keys"
 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.RequestURI == oidcDiscoveryUriPath {
 			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
@@ -677,7 +685,8 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	}
 	jwtConfiguration := &types.Jwt{}
 	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&Nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
 	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true, "/")
 
@@ -686,20 +695,18 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
-	var scheme string
-	if res.Request.TLS != nil {
-		scheme = "https"
-	} else {
-		scheme = "http"
-	}
+	expectedBodyRegex, err := regexp.Compile("\n<!DOCTYPE html><html><head><title></title></head><body>\n\n<script>\nwindow.location = '(.*)'\n</script>\nPlease sign in at <a href='(.*)'>(.*)</a>\n</body></html>\n\n")
+	expectedBodyMatches := expectedBodyRegex.FindStringSubmatch(string(body))
 
-	if res.Request.URL.Path == ""{
-		res.Request.URL.Path = "/"
-	}
-	redirectUrl := res.Request.URL.String()
+	assert.Len(t, expectedBodyMatches, 4, "Expect 4 matches")
 
-	expectedReturnUrl := url.QueryEscape(fmt.Sprintf("%s://%s%s?%s=%s", scheme, res.Request.Host, callbackPath, redirectUriQuerystringParameterName, url.QueryEscape(redirectUrl)))
-	assert.Equal(t, fmt.Sprintf("\n<!DOCTYPE html><html><head><title></title></head><body>\nRequired authorization token not found\n<script>\nwindow.location = 'https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri=%s&scope=openid&response_type=id_token&prompt=login'\n</script>\nPlease sign in at <a href='https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri=%s&scope=openid&response_type=id_token&prompt=login'>https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&amp;client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&amp;nonce=defaultNonce&amp;redirect_uri=%s&amp;scope=openid&amp;response_type=id_token&amp;prompt=login</a>\n</body></html>\n\n", template.JSEscapeString(expectedReturnUrl), expectedReturnUrl, expectedReturnUrl), string(body), "they should be equal")
+	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(jwtConfiguration.SsoAddressTemplate, "{{.Url}}", "(.*)", -1), "/", "\\/", -1), "?", "\\?", -1)
+	bodyMatch := expectedBodyMatches[1]
+
+	expectedRedirectUrlRegex, err := regexp.Compile(redirectUrlRegex)
+	expectedRedirectUrlMatches := expectedRedirectUrlRegex.FindStringSubmatch(bodyMatch)
+
+	assert.Len(t, expectedRedirectUrlMatches, 2, "Expect 2 matches")
 }
 
 func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
@@ -740,7 +747,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 	jwksUriPath := "/common/discovery/keys"
 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.RequestURI == oidcDiscoveryUriPath {
 			jwksUri := fmt.Sprintf("http://%s%s", r.Host, jwksUriPath)
@@ -759,7 +766,8 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 
 	jwtConfiguration := &types.Jwt{}
 	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&Nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
 	if err != nil {
@@ -797,5 +805,6 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
-	assert.Equal(t, fmt.Sprintf("\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\ndocument.cookie = 'traefik_session=' + getBookMarkParameterByName('id_token') \nwindow.location = '%s'\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n", template.JSEscapeString(redirectUrl)), string(body), "they should be equal")
+	expectedBody := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\ndocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\nstate = encodeURIComponent(getBookMarkParameterByName('state'));\nwindow.location.replace();\nif (state) {\n\twindow.location = state;\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
+	assert.EqualValues(t, expectedBody, string(body), "they should be equal")
 }

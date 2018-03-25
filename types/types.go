@@ -214,13 +214,15 @@ type Redirect struct {
 
 // Jwt authentication
 type Jwt struct {
-	Issuer               string `json:"issuer,omitempty"`
-	Audience             string `json:"audience,omitempty"`
-	JwksAddress          string `json:"jwksAddress,omitempty"`
-	OidcDiscoveryAddress string `json:"oidcDiscoveryAddress,omitempty"`
-	ClientSecret         string `json:"clientSecret,omitempty"`
-	PublicKey            string `json:"publicKey,omitempty"`
-	SsoAddressTemplate   string `json:"ssoAddressTemplate,omitempty"`
+	ClientSecret       string `json:"clientSecret,omitempty"`
+	PublicKey          string `json:"publicKey,omitempty"`
+	Issuer             string `json:"issuer,omitempty"`
+	Audience           string `json:"audience,omitempty"`
+	JwksAddress        string `json:"jwksAddress,omitempty"`
+	DiscoveryAddress   string `json:"discoveryAddress,omitempty"`
+	SsoAddressTemplate string `json:"ssoAddressTemplate,omitempty"`
+	UrlMacClientSecret string `json:"urlMacClientSecret,omitempty"`
+	UrlMacPrivateKey   string `json:"urlMacPrivateKey,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.

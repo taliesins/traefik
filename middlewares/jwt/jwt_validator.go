@@ -1,16 +1,19 @@
 package jwt
 
 import (
-	"github.com/containous/traefik/middlewares/tracing"
-	"github.com/containous/traefik/types"
-	"github.com/urfave/negroni"
-	"github.com/auth0/go-jwt-middleware"
 	"fmt"
-
+	"github.com/auth0/go-jwt-middleware"
+	"github.com/containous/traefik/middlewares/tracing"
+	"github.com/containous/traefik/server/uuid"
+	"github.com/containous/traefik/types"
 	"github.com/dgrijalva/jwt-go"
+	"github.com/urfave/negroni"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 type JwtValidator struct {
@@ -57,6 +60,12 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		ssoRedirectUrlTemplate = nil
 	}
 
+	//callback page for sso
+	ssoCallbackPageTemplate, err := renderSsoCallbackPageTemplate()
+	if err != nil {
+		return nil, err
+	}
+
 	//Standard client secret Jwt validation
 	var clientSecret []byte
 	if config.ClientSecret != "" {
@@ -76,59 +85,81 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		publicKey = nil
 	}
 
+	//Url hash using secret
+	var urlHashClientSecret []byte
+	if config.UrlMacClientSecret != "" {
+		urlHashClientSecret = []byte(config.UrlMacClientSecret)
+	} else {
+		urlHashClientSecret = nil
+	}
+
+	//Url hash using private key
+	var urlHashPrivateKey interface{}
+	if config.UrlMacPrivateKey != "" {
+		urlHashPrivateKey, _, err = GetPrivateKeyFromFileOrContent(config.UrlMacPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		urlHashPrivateKey = nil
+	}
+
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
-		ErrorHandler:func(w http.ResponseWriter, r *http.Request, errorMessage string){
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, errorMessage string) {
 			if ssoRedirectUrlTemplate == nil {
-				http.Error(w, errorMessage, http.StatusUnauthorized)
+				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
-			if strings.HasPrefix(r.URL.Path, callbackPath)  {
-				query := r.URL.Query()
-
-				//Anonymous user going directly to redirect url, so ignore it
-				redirectUrl := query.Get(redirectUriQuerystringParameterName)
-				if redirectUrl == "" {
-					http.Error(w, errorMessage, http.StatusUnauthorized)
+			if strings.HasPrefix(r.URL.Path, callbackPath) {
+				if strings.HasPrefix(r.Referer(), callbackPath) {
+					//Referrer was from callbackPath, so stop endless loop
+					http.Error(w, "", http.StatusUnauthorized)
 					return
 				}
 
 				//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
-				idTokenInBookmarkRedirectPage, err := renderIdTokenInBookmarkRedirectPageTemplate(redirectUrl, sessionCookieName, idTokenBookmarkParameterName)
-				if err != nil {
-					http.Error(w, errorMessage, http.StatusUnauthorized)
-					return
-				} else {
-					w.Header().Set("Content-Type", "text/html; charset=utf-8")
-					w.Header().Set("X-Content-Type-Options", "nosniff")
-					w.WriteHeader(http.StatusUnauthorized)
-					fmt.Fprintln(w, idTokenInBookmarkRedirectPage)
-					return
-				}
-			}
-
-			callbackRedirectUrl, err := renderCallbackRedirectUrlTemplate(r, callbackPath, redirectUriQuerystringParameterName)
-			if err != nil {
-				http.Error(w, errorMessage, http.StatusUnauthorized)
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintln(w, ssoCallbackPageTemplate)
 				return
 			}
 
-			ssoRedirectUrl, err := renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate, callbackRedirectUrl)
+			nonce := uuid.Get()
+			issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+			var redirectorUrl *url.URL
+			if urlHashPrivateKey != nil {
+				redirectorUrl, err = getRedirectorUrl(r, urlHashPrivateKey, nonce, issuedAt)
+			} else if urlHashClientSecret != nil {
+				redirectorUrl, err = getRedirectorUrl(r, urlHashClientSecret, nonce, issuedAt)
+			} else {
+				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
 			if err != nil {
-				http.Error(w, errorMessage, http.StatusUnauthorized)
+				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
-			redirectToSingleSignOnPage, err := renderRedirectToSsoPageTemplate(ssoRedirectUrl, errorMessage)
+			ssoRedirectUrl, err := renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate, redirectorUrl, nonce, issuedAt)
 			if err != nil {
-				http.Error(w, errorMessage, http.StatusUnauthorized)
+				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
+
+			//This will allow browsers to default to implicit flow
+			redirectToSsoPage, err := renderRedirectToSsoPageTemplate(ssoRedirectUrl, "")
+			if err != nil {
+				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprintln(w, redirectToSingleSignOnPage)
+			fmt.Fprintln(w, redirectToSsoPage)
 		},
 		Extractor: func(r *http.Request) (token string, err error) {
 			authHeader := r.Header.Get("Authorization")
@@ -140,19 +171,18 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				}
 			}
 
-			query := r.URL.Query()
-
-			token = query.Get("id_token")
-			if token != "" {
-				return token, nil
-			}
-
 			sessionCookie, err := r.Cookie(sessionCookieName)
 			if err == nil {
 				token = sessionCookie.Value
 				if token != "" {
 					return token, nil
 				}
+			}
+
+			query := r.URL.Query()
+			token = query.Get("id_token")
+			if token != "" {
+				return token, nil
 			}
 
 			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
@@ -164,7 +194,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		},
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
 			algHeader, ok := token.Header["alg"]
-			if !ok{
+			if !ok {
 				return nil, fmt.Errorf("Cannot get alg to use")
 			}
 			alg := algHeader.(string)
@@ -174,7 +204,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 			kid := ""
 			kidHeader, ok := token.Header["kid"]
-			if ok{
+			if ok {
 				kid = kidHeader.(string)
 			}
 
@@ -182,13 +212,13 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return clientSecret, nil
 			}
 
-			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.OidcDiscoveryAddress == "")) {
+			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "")) {
 				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
 
 			// If kid exists then we using dynamic public keys
-			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.OidcDiscoveryAddress != "") {
+			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "") {
 				claims := token.Claims.(jwt.MapClaims)
 
 				iss := ""
@@ -201,6 +231,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 					aud = claims["aud"].(string)
 				}
 
+				//Todo: Add all the validations required
 				if config.Issuer != "" && iss != config.Issuer {
 					return nil, fmt.Errorf("Cannot validate iss claim")
 				}
@@ -210,15 +241,15 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				}
 
 				var (
-					err                       error
-					publicKey                 interface{}
+					err       error
+					publicKey interface{}
 				)
 
 				//public keys are calculated JIT as they are dynamic
 				if config.JwksAddress != "" {
 					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
-				} else if config.OidcDiscoveryAddress != "" {
-					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.OidcDiscoveryAddress)
+				} else if config.DiscoveryAddress != "" {
+					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
 				} else if config.Issuer != "" {
 					publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
 				}
@@ -235,29 +266,34 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		},
 	})
 
-	jwtHandlerFunc := func (w http.ResponseWriter, r *http.Request, next http.HandlerFunc){
+	jwtHandlerFunc := func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+		//Todo: White list of paths that do not have to be authenticated
+
+		if strings.HasPrefix(r.URL.Path, robotsPath) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, "User-agent: *\nDisallow: /")
+			return
+		}
+
 		err := jwtMiddleware.CheckJWT(w, r)
 
-		if err == nil && strings.HasPrefix(r.URL.Path, callbackPath) {
-			//SSO might have redirected back here and supplied id_token so we can now redirect to redirct_uri
-			query := r.URL.Query()
-
-			//Logged in user going directly to redirect url, so ignore it
-			redirectUrl := query.Get(redirectUriQuerystringParameterName)
-			if redirectUrl == "" {
+		if err == nil && strings.HasPrefix(r.URL.Path, redirectorPath) {
+			// Unauthorized page with javascript to capture id_token from bookmark has run and redirected here
+			var redirectUrl *url.URL
+			if urlHashPrivateKey != nil {
+				redirectUrl, err = getRedirectUrl(r, urlHashPrivateKey)
+			} else if urlHashClientSecret != nil {
+				redirectUrl, err = getRedirectUrl(r, urlHashClientSecret)
+			} else {
+				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
+			if err != nil {
 				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
-			//Redirect user to the uri the triggered authentication request
-			/*
-			When logging in with SSO we would loose any POST data, so its safer to assume that a login to run a GET vs a POST
-
-			https://www.pmg.com/blog/301-302-303-307-many-redirects/
-			303 See Other - The response to the request can be found under another URI using a GET method. When received in response to a PUT, it should be assumed that the server has received the data and the redirect should be issued with a separate GET message.
-			*/
-			http.Redirect(w, r, redirectUrl, http.StatusSeeOther)
-
+			http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
 			return
 		}
 

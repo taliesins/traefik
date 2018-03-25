@@ -14,6 +14,9 @@ import (
 	traefiktls "github.com/containous/traefik/tls"
 	"github.com/dgrijalva/jwt-go"
 	"net/url"
+	"crypto/tls"
+	"crypto/rsa"
+	"crypto/ecdsa"
 )
 
 var lruCache *lru.Cache
@@ -45,7 +48,12 @@ func GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string) (
 		return jwksUri, nil
 	}
 
-	resp, err := http.Get(openIdConnectDiscoveryUri)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	resp, err := client.Get(openIdConnectDiscoveryUri)
+
 	if err != nil {
 		return "", fmt.Errorf("json validation error: %s", err)
 	}
@@ -116,7 +124,11 @@ func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.Sign
 		}
 	}
 
-	resp, err := http.Get(jwksUri)
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	resp, err := client.Get(jwksUri)
 	if err != nil {
 		return nil, x509.UnknownSignatureAlgorithm, err
 	}
@@ -142,6 +154,40 @@ func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.Sign
 	})
 
 	return publicKey, signingAlgorithm, nil
+}
+
+func GetPrivateKeyFromFileOrContent(certificateFileOrContents string) (interface{}, x509.SignatureAlgorithm, error) {
+	// Try to get and return existing entry from cache. If cache is expired,
+	// it will try proceed with rest of the function call
+	cached, ok := lruCache.Get(certificateFileOrContents)
+	if ok {
+		val := cached.(*jwksCacheValue)
+
+		// Check for expiry
+		if time.Now().Before(cached.(*jwksCacheValue).Expiry) {
+			cert := cached.(*jwksCacheValue)
+			return cert.Data, val.SigningAlgorithm, nil
+		}
+	}
+
+	pemData, err := traefiktls.FileOrContent(certificateFileOrContents).Read()
+	if err != nil {
+		return nil, x509.UnknownSignatureAlgorithm, err
+	}
+
+	privateKey, err := GetPrivateKeyFromPem(pemData)
+	if err != nil {
+		return nil, x509.UnknownSignatureAlgorithm, err
+	}
+
+	// Store value in cache
+	lruCache.Add(certificateFileOrContents, &jwksCacheValue{
+		SigningAlgorithm: x509.UnknownSignatureAlgorithm,
+		Data:             privateKey,
+		Expiry:           time.Now().Add(time.Minute * time.Duration(5)),
+	})
+
+	return privateKey, x509.UnknownSignatureAlgorithm, nil
 }
 
 func GetPrivateKeyFromPem(privateKeyPemData []byte) (interface{}, error){
@@ -235,4 +281,44 @@ func GetPublicKeyFromFileOrContent(certificateFileOrContents string) (interface{
 	})
 
 	return publicKey, signingAlgorithm, nil
+}
+
+func SignMac(signingString string, key interface{}) (string, error){
+	switch privateKeyType := key.(type) {
+	case *rsa.PrivateKey:
+		{
+			return jwt.SigningMethodPS256.Sign(signingString, privateKeyType)
+
+		}
+	case *ecdsa.PrivateKey:
+		{
+			return jwt.SigningMethodES256.Sign(signingString, privateKeyType)
+		}
+	case []byte:
+		{
+			return jwt.SigningMethodHS256.Sign(signingString, key)
+		}
+	default:
+		return "", fmt.Errorf("Unsupported key type %T", privateKeyType)
+	}
+}
+
+func VerifyMac(signingString string, signature string, key interface{}) (error){
+	switch privateKeyType := key.(type) {
+	case *rsa.PrivateKey:
+		{
+			return jwt.SigningMethodPS256.Verify(signingString, signature, privateKeyType)
+
+		}
+	case *ecdsa.PrivateKey:
+		{
+			return jwt.SigningMethodES256.Verify(signingString, signature, privateKeyType)
+		}
+	case []byte:
+		{
+			return jwt.SigningMethodHS256.Verify(signingString, signature, key)
+		}
+	default:
+		return fmt.Errorf("Unsupported key type %T", privateKeyType)
+	}
 }

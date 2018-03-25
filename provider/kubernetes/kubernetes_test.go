@@ -1088,39 +1088,51 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthOidcIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
 			iRules(
 				iRule(
-					iHost("jwt-issuer-uri"),
+					iHost("oidc-issuer-uri"),
 					iPaths(onePath(iPath("/issuer-uri"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtOidcDiscoveryAddress, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration"),
+			iAnnotation(annotationKubernetesAuthOidcDiscoveryAddress, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration"),
 			iRules(
 				iRule(
-					iHost("jwt-oidc-discovery-uri"),
-					iPaths(onePath(iPath("/oidc-discovery-uri"), iBackend("service1", intstr.FromInt(80))))),
+					iHost("oidc-discovery-uri"),
+					iPaths(onePath(iPath("/discovery-uri"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtJwksAddress, "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys"),
+			iAnnotation(annotationKubernetesAuthOidcJwksAddress, "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys"),
 			iRules(
 				iRule(
-					iHost("jwt-jwks-uri"),
+					iHost("oidc-jwks-uri"),
 					iPaths(onePath(iPath("/jwks-uri"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
-			iAnnotation(annotationKubernetesAuthJwtSsoAddressTemplate, "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+			iAnnotation(annotationKubernetesAuthOidcIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthOidcSsoAddressTemplate, "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+			iAnnotation(annotationKubernetesAuthOidcUrlMacClientSecret, "mySecret"),
 			iRules(
 				iRule(
-					iHost("jwt-sso-address-template"),
-					iPaths(onePath(iPath("/sso-address-template"), iBackend("service1", intstr.FromInt(80))))),
+					iHost("oidc-url-mac-client-secret"),
+					iPaths(onePath(iPath("/url-mac-client-secret"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthOidcIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthOidcSsoAddressTemplate, "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+			iAnnotation(annotationKubernetesAuthOidcUrlMacPrivateKey, "mySecret"),
+			iRules(
+				iRule(
+					iHost("oidc-url-mac-private-key"),
+					iPaths(onePath(iPath("/url-mac-private-key"), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 		buildIngress(
@@ -1412,25 +1424,31 @@ rateset:
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-issuer-uri/issuer-uri",
+			backend("oidc-issuer-uri/issuer-uri",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-oidc-discovery-uri/oidc-discovery-uri",
+			backend("oidc-discovery-uri/discovery-uri",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-jwks-uri/jwks-uri",
+			backend("oidc-jwks-uri/jwks-uri",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
-			backend("jwt-sso-address-template/sso-address-template",
+			backend("oidc-url-mac-client-secret/url-mac-client-secret",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
+			backend("oidc-url-mac-private-key/url-mac-private-key",
 				servers(
 					server("http://example.com", weight(1)),
 					server("http://example.com", weight(1))),
@@ -1551,45 +1569,52 @@ rateset:
 			),
 			frontend("jwt-shared-secret/shared-secret",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", ""),
+				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", "", "", ""),
 				routes(
 					route("/shared-secret", "PathPrefix:/shared-secret"),
 					route("jwt-shared-secret", "Host:jwt-shared-secret")),
 			),
 			frontend("jwt-public-key/public-key",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "publicKey", "", ""),
+				jwtAuth("", "", "", "", "publicKey", "", "", "", ""),
 				routes(
 					route("/public-key", "PathPrefix:/public-key"),
 					route("jwt-public-key", "Host:jwt-public-key")),
 			),
-			frontend("jwt-issuer-uri/issuer-uri",
+			frontend("oidc-issuer-uri/issuer-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", ""),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/issuer-uri", "PathPrefix:/issuer-uri"),
-					route("jwt-issuer-uri", "Host:jwt-issuer-uri")),
+					route("oidc-issuer-uri", "Host:oidc-issuer-uri")),
 			),
-			frontend("jwt-oidc-discovery-uri/oidc-discovery-uri",
+			frontend("oidc-discovery-uri/discovery-uri",
 				passHostHeader(),
-				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", "", "", ""),
+				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", "", "", "", "", ""),
 				routes(
-					route("/oidc-discovery-uri", "PathPrefix:/oidc-discovery-uri"),
-					route("jwt-oidc-discovery-uri", "Host:jwt-oidc-discovery-uri")),
+					route("/discovery-uri", "PathPrefix:/discovery-uri"),
+					route("oidc-discovery-uri", "Host:oidc-discovery-uri")),
 			),
-			frontend("jwt-jwks-uri/jwks-uri",
+			frontend("oidc-jwks-uri/jwks-uri",
 				passHostHeader(),
-				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", ""),
+				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", "", "", ""),
 				routes(
 					route("/jwks-uri", "PathPrefix:/jwks-uri"),
-					route("jwt-jwks-uri", "Host:jwt-jwks-uri")),
+					route("oidc-jwks-uri", "Host:oidc-jwks-uri")),
 			),
-			frontend("jwt-sso-address-template/sso-address-template",
+			frontend("oidc-url-mac-client-secret/url-mac-client-secret",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login", "", "myUser:myEncodedPW"),
 				routes(
-					route("/sso-address-template", "PathPrefix:/sso-address-template"),
-					route("jwt-sso-address-template", "Host:jwt-sso-address-template")),
+					route("/url-mac-client-secret", "PathPrefix:/url-mac-client-secret"),
+					route("oidc-url-mac-client-secret", "Host:oidc-url-mac-client-secret")),
+			),
+			frontend("oidc-url-mac-private-key/url-mac-private-key",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login", "myUser:myEncodedPW", ""),
+				routes(
+					route("/url-mac-private-key", "PathPrefix:/url-mac-private-key"),
+					route("oidc-url-mac-private-key", "Host:oidc-url-mac-private-key")),
 			),
 			frontend("redirect/https",
 				passHostHeader(),
@@ -2693,15 +2718,20 @@ func TestLoadIngressesForwardAuthWithTLSSecretFailures(t *testing.T) {
 	}
 }
 
-func TestJwtSharedSecretInTemplate(t *testing.T) {
+func TestJwtClientSecretInTemplate(t *testing.T) {
+	host := "jwt-client-secret"
+	path := "/client-secret"
+	secretKey := "mySecret"
+	secretValue := "mySecretIsBob"
+
 	ingresses := []*extensionsv1beta1.Ingress{
 		buildIngress(
 			iNamespace("testing"),
-			iAnnotation(annotationKubernetesAuthJwtClientSecret, "mySecret"),
+			iAnnotation(annotationKubernetesAuthJwtClientSecret, secretKey),
 			iRules(
 				iRule(
-					iHost("jwt-shared-secret"),
-					iPaths(onePath(iPath("/shared-secret"), iBackend("service1", intstr.FromInt(80))))),
+					iHost(host),
+					iPaths(onePath(iPath(path), iBackend("service1", intstr.FromInt(80))))),
 			),
 		),
 	}
@@ -2721,12 +2751,12 @@ func TestJwtSharedSecretInTemplate(t *testing.T) {
 
 	secrets := []*corev1.Secret{{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "mySecret",
+			Name:      secretKey,
 			UID:       "1",
 			Namespace: "testing",
 		},
 		Data: map[string][]byte{
-			"mySecret": []byte("mySecretIsBob"),
+			secretKey: []byte(secretValue),
 		},
 	}}
 
@@ -2743,17 +2773,155 @@ func TestJwtSharedSecretInTemplate(t *testing.T) {
 
 	actual, err := provider.loadIngresses(client)
 	require.NoError(t, err, "error loading ingresses")
-	got := actual.Frontends["jwt-shared-secret/shared-secret"].Jwt.ClientSecret
-	if got != "mySecretIsBob" {
-		t.Fatalf("unexpected jwt client secret from ingress: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
+	got := actual.Frontends[host + path].Jwt.ClientSecret
+	if got != secretValue {
+		t.Fatalf("unexpected jwt client secret from ingress: %+v", actual.Frontends[host + path])
 	}
 
 	actual = provider.loadConfig(*actual)
 
 	require.NotNil(t, actual)
-	got = actual.Frontends["jwt-shared-secret/shared-secret"].Jwt.ClientSecret
-	if got != "mySecretIsBob" {
-		t.Fatalf("unexpected jwt client secret from loadConfig: %+v", actual.Frontends["jwt-shared-secret/shared-secret"])
+	got = actual.Frontends[host + path].Jwt.ClientSecret
+	if got != secretValue {
+		t.Fatalf("unexpected jwt client secret from loadConfig: %+v", actual.Frontends[host + path])
+	}
+}
+
+func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
+	host := "oidc-url-mac-client-secret"
+	path := "/url-mac-client-secret"
+	secretKey := "mySecret"
+	secretValue := "mySecretIsBob"
+
+	ingresses := []*extensionsv1beta1.Ingress{
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthOidcUrlMacClientSecret, secretKey),
+			iRules(
+				iRule(
+					iHost(host),
+					iPaths(onePath(iPath(path), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+	}
+
+	services := []*corev1.Service{
+		buildService(
+			sName("service1"),
+			sNamespace("testing"),
+			sUID("1"),
+			sSpec(
+				clusterIP("10.0.0.1"),
+				sType("ExternalName"),
+				sExternalName("example.com"),
+				sPorts(sPort(80, "http"))),
+		),
+	}
+
+	secrets := []*corev1.Secret{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretKey,
+			UID:       "1",
+			Namespace: "testing",
+		},
+		Data: map[string][]byte{
+			secretKey: []byte(secretValue),
+		},
+	}}
+
+	var endpoints []*corev1.Endpoints
+	watchChan := make(chan interface{})
+	client := clientMock{
+		ingresses: ingresses,
+		services:  services,
+		secrets:   secrets,
+		endpoints: endpoints,
+		watchChan: watchChan,
+	}
+	provider := Provider{}
+
+	actual, err := provider.loadIngresses(client)
+	require.NoError(t, err, "error loading ingresses")
+	got := actual.Frontends[host + path].Jwt.UrlMacClientSecret
+	if got != secretValue {
+		t.Fatalf("unexpected oidc url mac client secret from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	actual = provider.loadConfig(*actual)
+
+	require.NotNil(t, actual)
+	got = actual.Frontends[host + path].Jwt.UrlMacClientSecret
+	if got != secretValue {
+		t.Fatalf("unexpected oidc url mac client secret from loadConfig: %+v", actual.Frontends[host + path])
+	}
+}
+
+func TestOidcUrlMacPrivateKeyInTemplate(t *testing.T) {
+	host := "oidc-url-mac-private-key"
+	path := "/url-mac-private-key"
+	secretKey := "mySecret"
+	secretValue := "-----BEGIN PRIVATE KEY-----\n-----END PRIVATE KEY-----"
+
+	ingresses := []*extensionsv1beta1.Ingress{
+		buildIngress(
+			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthOidcUrlMacPrivateKey, secretKey),
+			iRules(
+				iRule(
+					iHost(host),
+					iPaths(onePath(iPath(path), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+	}
+
+	services := []*corev1.Service{
+		buildService(
+			sName("service1"),
+			sNamespace("testing"),
+			sUID("1"),
+			sSpec(
+				clusterIP("10.0.0.1"),
+				sType("ExternalName"),
+				sExternalName("example.com"),
+				sPorts(sPort(80, "http"))),
+		),
+	}
+
+	secrets := []*corev1.Secret{{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretKey,
+			UID:       "1",
+			Namespace: "testing",
+		},
+		Data: map[string][]byte{
+			secretKey: []byte(secretValue),
+		},
+	}}
+
+	var endpoints []*corev1.Endpoints
+	watchChan := make(chan interface{})
+	client := clientMock{
+		ingresses: ingresses,
+		services:  services,
+		secrets:   secrets,
+		endpoints: endpoints,
+		watchChan: watchChan,
+	}
+	provider := Provider{}
+
+	actual, err := provider.loadIngresses(client)
+	require.NoError(t, err, "error loading ingresses")
+	got := actual.Frontends[host + path].Jwt.UrlMacPrivateKey
+	if got != secretValue {
+		t.Fatalf("unexpected oidc url mac private key from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	actual = provider.loadConfig(*actual)
+
+	require.NotNil(t, actual)
+	got = actual.Frontends[host + path].Jwt.UrlMacPrivateKey
+	if got != secretValue {
+		t.Fatalf("unexpected oidc url mac private key from loadConfig: %+v", actual.Frontends[host + path])
 	}
 }
 

@@ -601,55 +601,94 @@ func parseRequestModifier(requestModifier, ruleType string) (string, error) {
 }
 
 func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, error) {
-	issuer := getStringValue(i.Annotations, annotationKubernetesAuthJwtIssuer, "")
-	audience := getStringValue(i.Annotations, annotationKubernetesAuthJwtAudience, "")
-	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtJwksAddress, "")
-	oidcDiscoveryAddress := getStringValue(i.Annotations, annotationKubernetesAuthJwtOidcDiscoveryAddress, "")
-	ssoAddressTemplate := getStringValue(i.Annotations, annotationKubernetesAuthJwtSsoAddressTemplate, "")
 	publicKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtPublicKey, "")
 	clientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
+	issuer := getStringValue(i.Annotations, annotationKubernetesAuthOidcIssuer, "")
+	audience := getStringValue(i.Annotations, annotationKubernetesAuthOidcAudience, "")
+	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthOidcJwksAddress, "")
+	oidcDiscoveryAddress := getStringValue(i.Annotations, annotationKubernetesAuthOidcDiscoveryAddress, "")
+	ssoAddressTemplate := getStringValue(i.Annotations, annotationKubernetesAuthOidcSsoAddressTemplate, "")
 
+	urlMacClientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthOidcUrlMacClientSecret, "")
+	urlMacPrivateKeyKey := getStringValue(i.Annotations, annotationKubernetesAuthOidcUrlMacPrivateKey, "")
 
 	jwt := types.Jwt{
-		Issuer:               issuer,
-		Audience:             audience,
-		JwksAddress:          jwksAddress,
-		OidcDiscoveryAddress: oidcDiscoveryAddress,
-		SsoAddressTemplate:   ssoAddressTemplate,
-		PublicKey:            publicKey,
-		ClientSecret:         clientSecretKey,
+		PublicKey:          publicKey,
+		Issuer:             issuer,
+		Audience:           audience,
+		JwksAddress:        jwksAddress,
+		DiscoveryAddress:   oidcDiscoveryAddress,
+		SsoAddressTemplate: ssoAddressTemplate,
 	}
 
-	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && publicKey == "" && clientSecretKey == "" {
+	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && urlMacPrivateKeyKey == "" && urlMacClientSecretKey == "" && publicKey == "" && clientSecretKey == ""  {
 		return nil, nil
 	}
 
-	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.OidcDiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
-		return nil, fmt.Errorf("annotation %v or %v or %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtPublicKey, annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtAudience)
+	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtPublicKey, annotationKubernetesAuthOidcIssuer, annotationKubernetesAuthOidcDiscoveryAddress, annotationKubernetesAuthOidcJwksAddress, annotationKubernetesAuthOidcAudience)
 	}
 
-	if jwt.Issuer == "" && jwt.OidcDiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.SsoAddressTemplate != "" {
-		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtIssuer, annotationKubernetesAuthJwtOidcDiscoveryAddress, annotationKubernetesAuthJwtJwksAddress, annotationKubernetesAuthJwtSsoAddressTemplate)
+	if jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.SsoAddressTemplate != "" {
+		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthOidcIssuer, annotationKubernetesAuthOidcDiscoveryAddress, annotationKubernetesAuthOidcJwksAddress, annotationKubernetesAuthOidcSsoAddressTemplate)
 	}
 
-	if clientSecretKey == "" {
-		return &jwt, nil
+	if urlMacClientSecretKey == "" && urlMacPrivateKeyKey == "" && jwt.SsoAddressTemplate != "" {
+		return nil, fmt.Errorf("annotation %v or %v must be set if annotation %v is specified", annotationKubernetesAuthOidcUrlMacPrivateKey, annotationKubernetesAuthOidcUrlMacClientSecret, annotationKubernetesAuthOidcSsoAddressTemplate)
 	}
 
-	jwtClientSecretArray, err := loadAuthCredentials(i.Namespace, clientSecretKey, k8sClient)
+	if clientSecretKey != "" {
+		jwtClientSecretArray, err := loadAuthCredentials(i.Namespace, clientSecretKey, k8sClient)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to get kubernetes secret called '%s': %s", clientSecretKey, err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubernetes secret called '%s': %s", clientSecretKey, err)
+		}
+
+		if len(jwtClientSecretArray) < 1 {
+			return nil, fmt.Errorf("Kubernetes secret '%s' has no value", clientSecretKey)
+		}
+
+		jwt.ClientSecret = strings.Join(jwtClientSecretArray, "\n")
+
+		if jwt.ClientSecret == "" {
+			return nil, fmt.Errorf("Client secret in kubernetes secret '%s' it should be '' and is '%v' '%#X'", clientSecretKey, jwt.ClientSecret, jwt.ClientSecret)
+		}
 	}
 
-	if len(jwtClientSecretArray) < 1 {
-		return nil, fmt.Errorf("Kubernetes secret '%s' has no value", clientSecretKey)
+	if urlMacClientSecretKey != "" {
+		jwtUrlMacClientSecretArray, err := loadAuthCredentials(i.Namespace, urlMacClientSecretKey, k8sClient)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubernetes secret called '%s': %s", urlMacClientSecretKey, err)
+		}
+
+		if len(jwtUrlMacClientSecretArray) < 1 {
+			return nil, fmt.Errorf("Kubernetes secret '%s' has no value", urlMacClientSecretKey)
+		}
+
+		jwt.UrlMacClientSecret = strings.Join(jwtUrlMacClientSecretArray, "\n")
+
+		if jwt.UrlMacClientSecret == "" {
+			return nil, fmt.Errorf("Url mac client secret in kubernetes secret '%s' it should be '' and is '%v' '%#X'", urlMacClientSecretKey, jwt.UrlMacClientSecret, jwt.UrlMacClientSecret)
+		}
 	}
 
-	jwt.ClientSecret = jwtClientSecretArray[0]
+	if urlMacPrivateKeyKey != "" {
+		jwtUrlMacPrivateKeyArray, err := loadAuthCredentials(i.Namespace, urlMacPrivateKeyKey, k8sClient)
 
-	if jwt.ClientSecret == "" {
-		return nil, fmt.Errorf("Client secret in kubernetes secret '%s' it should be '' and is '%v' '%#X'", clientSecretKey, jwt.ClientSecret, jwt.ClientSecret)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get kubernetes secret called '%s': %s", urlMacPrivateKeyKey, err)
+		}
+
+		if len(jwtUrlMacPrivateKeyArray) < 1 {
+			return nil, fmt.Errorf("Kubernetes secret '%s' has no value", urlMacPrivateKeyKey)
+		}
+
+		jwt.UrlMacPrivateKey = strings.Join(jwtUrlMacPrivateKeyArray, "\n")
+
+		if jwt.UrlMacPrivateKey == "" {
+			return nil, fmt.Errorf("Url mac private key in kubernetes secret '%s' it should be '' and is '%v' '%#X'", urlMacPrivateKeyKey, jwt.UrlMacPrivateKey, jwt.UrlMacPrivateKey)
+		}
 	}
 
 	return &jwt, nil

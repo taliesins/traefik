@@ -932,13 +932,16 @@ var _templatesKubernetesTmpl = []byte(`[backends]
 
     {{if $frontend.Jwt }}
     [frontends."{{ $frontendName }}".jwt]
+      publicKey = "{{ $frontend.Jwt.PublicKey }}"
+      clientSecret = "{{ $frontend.Jwt.ClientSecret }}"
+
       issuer = "{{ $frontend.Jwt.Issuer }}"
       audience = "{{ $frontend.Jwt.Audience }}"
       jwksAddress = "{{ $frontend.Jwt.JwksAddress }}"
-      oidcDiscoveryAddress = "{{ $frontend.Jwt.OidcDiscoveryAddress }}"
+      discoveryAddress = "{{ $frontend.Jwt.DiscoveryAddress }}"
       ssoAddressTemplate = "{{ $frontend.Jwt.SsoAddressTemplate }}"
-      publicKey = "{{ $frontend.Jwt.PublicKey }}"
-      clientSecret = "{{ $frontend.Jwt.ClientSecret }}"
+      urlMacClientSecret = "{{ $frontend.Jwt.UrlMacClientSecret }}"
+      urlMacPrivateKey = """{{ $frontend.Jwt.UrlMacPrivateKey }}"""
     {{end}}
 
     {{if $frontend.RateLimit }}
