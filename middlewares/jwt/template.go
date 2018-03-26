@@ -7,12 +7,14 @@ import (
 	"text/template"
 	htmlTemplate "text/template"
 )
+
 var sessionCookieName = "id_token"
 
 type ssoRedirectUrlTemplateOptions struct {
-	Url      string
-	Nonce    string
-	IssuedAt string
+	CallbackUrl string
+	State       string
+	Nonce       string
+	IssuedAt    string
 }
 
 //"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.Url}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
@@ -20,15 +22,24 @@ func getSsoRedirectUrlTemplate(templateToRender string) (*template.Template, err
 	return template.New("SsoRedirectUrl").Parse(templateToRender)
 }
 
-//var redirectUrlTemplate = `https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login`
+//var redirectUrlTemplate = `https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login`
 func renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate *template.Template, urlToRedirectTo *url.URL, nonce string, issuedAt string) (*url.URL, error) {
-	encodedUrl := url.QueryEscape(urlToRedirectTo.String())
+	//We want to only use a hard coded host and path in the callback page. The hash ensures that the correct full path is required when doing a redirect. This also reduces the size of the state querystring parameter
+	encodedUrl := urlToRedirectTo.Query().Encode()
+	callbackUrl, err := url.Parse(urlToRedirectTo.String())
+	if err != nil {
+		return nil, err
+	}
+
+	callbackUrl.RawQuery = ""
+	callbackUrl.Path = callbackPath
 
 	var redirectSsoUrlTemplateRendered bytes.Buffer
-	err := ssoRedirectUrlTemplate.Execute(&redirectSsoUrlTemplateRendered, ssoRedirectUrlTemplateOptions{
-		Url:      encodedUrl,
-		Nonce:    nonce,
-		IssuedAt: issuedAt,
+	err = ssoRedirectUrlTemplate.Execute(&redirectSsoUrlTemplateRendered, ssoRedirectUrlTemplateOptions{
+		CallbackUrl: callbackUrl.String(),
+		State:       encodedUrl,
+		Nonce:       nonce,
+		IssuedAt:    issuedAt,
 	})
 
 	if err != nil {
@@ -92,6 +103,7 @@ func renderRedirectToSsoPageTemplate(redirectUrl *url.URL, errorMessage string) 
 }
 
 type ssoCallbackPageTemplateOptions struct {
+	RedirectorUrl                string
 	SessionCookieName            string
 	IdTokenBookmarkParameterName string
 	StateBookmarkParameterName   string
@@ -113,20 +125,29 @@ function getBookMarkParameterByName(name, url) {
     return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
 
-document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
 state = encodeURIComponent(getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkParameterName}}'));
 window.location.replace();
 if (state) {
-	window.location = state;
+	document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
+	window.location = '{{ escapeJavascriptVariable .RedirectorUrl}}?' + state;
 }
 </script>
 Please change the '#' in the url to '&' and goto link
 </body></html>
 `))
 
-func renderSsoCallbackPageTemplate() (string, error) {
+func renderSsoCallbackPageTemplate(redirectorUrl *url.URL) (string, error) {
+	redirectorUrlWithoutQuerystring, err := url.Parse(redirectorUrl.String())
+	if err != nil {
+		return "", err
+	}
+
+	//Strip querystring as this is coming from the state parameter
+	redirectorUrlWithoutQuerystring.RawQuery = ""
+
 	var idTokenInBookmarkRedirectPageTemplateRendered bytes.Buffer
-	err := ssoCallbackPageTemplate.Execute(&idTokenInBookmarkRedirectPageTemplateRendered, ssoCallbackPageTemplateOptions{
+	err = ssoCallbackPageTemplate.Execute(&idTokenInBookmarkRedirectPageTemplateRendered, ssoCallbackPageTemplateOptions{
+		RedirectorUrl:                redirectorUrlWithoutQuerystring.String(),
 		SessionCookieName:            sessionCookieName,
 		IdTokenBookmarkParameterName: idTokenBookmarkParameterName,
 		StateBookmarkParameterName:   stateBookmarkParameterName,

@@ -685,7 +685,7 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	}
 	jwtConfiguration := &types.Jwt{}
 	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&Nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
 	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true, "/")
@@ -695,18 +695,30 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
+	expectedRedirectUri, err := url.Parse(res.Request.URL.String())
+	if err != nil {
+		panic(err)
+	}
+
+	expectedRedirectUri.Path = callbackPath
+
+
 	expectedBodyRegex, err := regexp.Compile("\n<!DOCTYPE html><html><head><title></title></head><body>\n\n<script>\nwindow.location = '(.*)'\n</script>\nPlease sign in at <a href='(.*)'>(.*)</a>\n</body></html>\n\n")
 	expectedBodyMatches := expectedBodyRegex.FindStringSubmatch(string(body))
-
 	assert.Len(t, expectedBodyMatches, 4, "Expect 4 matches")
-
-	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(jwtConfiguration.SsoAddressTemplate, "{{.Url}}", "(.*)", -1), "/", "\\/", -1), "?", "\\?", -1)
 	bodyMatch := expectedBodyMatches[1]
 
+	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(strings.Replace(strings.Replace(jwtConfiguration.SsoAddressTemplate, "{{.CallbackUrl}}", "(.*)", -1), "{{.State}}", "(.*)", -1), "{{.Nonce}}", "(.*)", -1), "/", "\\/", -1), "?", "\\?", -1)
 	expectedRedirectUrlRegex, err := regexp.Compile(redirectUrlRegex)
 	expectedRedirectUrlMatches := expectedRedirectUrlRegex.FindStringSubmatch(bodyMatch)
+	assert.Len(t, expectedRedirectUrlMatches, 4, "Expect 4 matches")
+	nonceMatch := expectedRedirectUrlMatches[1]
+	redirectUriMatch := expectedRedirectUrlMatches[2]
+	stateMatch := expectedRedirectUrlMatches[3]
 
-	assert.Len(t, expectedRedirectUrlMatches, 2, "Expect 2 matches")
+	assert.NotEqual(t, "", nonceMatch, "nonce should be specified")
+	assert.EqualValues(t, expectedRedirectUri.String(), redirectUriMatch, "redirect_uri should be specified")
+	assert.NotEqual(t, "", stateMatch, "state should be specified")
 }
 
 func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
@@ -766,7 +778,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 
 	jwtConfiguration := &types.Jwt{}
 	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&Nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
 	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
@@ -796,6 +808,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 	//Work out the url that the SSO would redirect back to
 	redirectUrl := clientRequestUrl.String()
 	expectedReturnUrl := fmt.Sprintf("%s://%s%s?%s=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, callbackPath, redirectUriQuerystringParameterName, url.QueryEscape(redirectUrl))
+	expectedRedirectorUrl := fmt.Sprintf("%s://%s%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath)
 
 	req := testhelpers.MustNewRequest(http.MethodGet, expectedReturnUrl, nil)
 	res, err := client.Do(req)
@@ -805,6 +818,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
-	expectedBody := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\ndocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\nstate = encodeURIComponent(getBookMarkParameterByName('state'));\nwindow.location.replace();\nif (state) {\n\twindow.location = state;\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
+	expectedBody := fmt.Sprintf("\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = encodeURIComponent(getBookMarkParameterByName('state'));\nwindow.location.replace();\nif (state) {\n\tdocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\n\twindow.location = '%s?' + state;\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n", expectedRedirectorUrl)
+
 	assert.EqualValues(t, expectedBody, string(body), "they should be equal")
 }

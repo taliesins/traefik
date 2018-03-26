@@ -68,7 +68,7 @@ func verifyAndStripMacHashFromUrl(url *url.URL, key interface{})(error){
 	return VerifyMac(url.String(), signature, key)
 }
 
-//var redirectUrlTemplate = `https://{{.Host}}/oauth2/redirector?redirect_uri={{.Url}}&Nonce={{.Nonce}}&iat={{.IssuedAt}}&hash={{.Hash}}`
+//var redirectUrlTemplate = `https://{{.Host}}/oauth2/redirector?redirect_uri={{.Url}}&nonce={{.Nonce}}&iat={{.IssuedAt}}&hash={{.Hash}}`
 func getRedirectorUrl(r *http.Request, key interface{}, nonce string, issuedAt string) (*url.URL, error) {
 	clonedUrl := cloneUrl(r)
 	redirectUrl := clonedUrl.String()

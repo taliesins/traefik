@@ -60,12 +60,6 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		ssoRedirectUrlTemplate = nil
 	}
 
-	//callback page for sso
-	ssoCallbackPageTemplate, err := renderSsoCallbackPageTemplate()
-	if err != nil {
-		return nil, err
-	}
-
 	//Standard client secret Jwt validation
 	var clientSecret []byte
 	if config.ClientSecret != "" {
@@ -111,21 +105,6 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return
 			}
 
-			if strings.HasPrefix(r.URL.Path, callbackPath) {
-				if strings.HasPrefix(r.Referer(), callbackPath) {
-					//Referrer was from callbackPath, so stop endless loop
-					http.Error(w, "", http.StatusUnauthorized)
-					return
-				}
-
-				//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprintln(w, ssoCallbackPageTemplate)
-				return
-			}
-
 			nonce := uuid.Get()
 			issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 
@@ -140,6 +119,28 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			}
 			if err != nil {
 				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
+
+			if strings.HasPrefix(r.URL.Path, callbackPath) {
+				if strings.HasPrefix(r.Referer(), callbackPath) {
+					//Referrer was from callbackPath, so stop endless loop
+					http.Error(w, "", http.StatusUnauthorized)
+					return
+				}
+
+				//callback page for sso
+				ssoCallbackPage, err := renderSsoCallbackPageTemplate(redirectorUrl)
+				if err != nil {
+					http.Error(w, "", http.StatusUnauthorized)
+					return
+				}
+
+				//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintln(w, ssoCallbackPage)
 				return
 			}
 
