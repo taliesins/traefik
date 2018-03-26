@@ -11,7 +11,7 @@ var redirectorPath = "/oauth2/redirector"
 var robotsPath = "/robots.txt"
 
 var redirectUriQuerystringParameterName = "redirect_uri"
-var nonceQuerystringParameterName = "Nonce"
+var nonceQuerystringParameterName = "nonce"
 var issuedAtQuerystringParameterName = "iat"
 var hashQuerystringParameterName = "hash"
 
