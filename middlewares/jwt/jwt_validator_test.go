@@ -716,9 +716,9 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	redirectUriMatch := expectedRedirectUrlMatches[2]
 	stateMatch := expectedRedirectUrlMatches[3]
 
-	assert.NotEqual(t, "", nonceMatch, "nonce should be specified")
-	assert.EqualValues(t, expectedRedirectUri.String(), redirectUriMatch, "redirect_uri should be specified")
-	assert.NotEqual(t, "", stateMatch, "state should be specified")
+	assert.NotEqual(t, url.QueryEscape(""), nonceMatch, "nonce should be specified")
+	assert.EqualValues(t, url.QueryEscape(expectedRedirectUri.String()), redirectUriMatch, "redirect_uri should be specified")
+	assert.NotEqual(t, url.QueryEscape(""), stateMatch, "state should be specified")
 }
 
 func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {

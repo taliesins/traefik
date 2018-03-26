@@ -25,7 +25,7 @@ func getSsoRedirectUrlTemplate(templateToRender string) (*template.Template, err
 //var redirectUrlTemplate = `https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login`
 func renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate *template.Template, urlToRedirectTo *url.URL, nonce string, issuedAt string) (*url.URL, error) {
 	//We want to only use a hard coded host and path in the callback page. The hash ensures that the correct full path is required when doing a redirect. This also reduces the size of the state querystring parameter
-	encodedUrl := urlToRedirectTo.Query().Encode()
+	state := urlToRedirectTo.Query().Encode()
 	callbackUrl, err := url.Parse(urlToRedirectTo.String())
 	if err != nil {
 		return nil, err
@@ -36,10 +36,10 @@ func renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate *template.Template, url
 
 	var redirectSsoUrlTemplateRendered bytes.Buffer
 	err = ssoRedirectUrlTemplate.Execute(&redirectSsoUrlTemplateRendered, ssoRedirectUrlTemplateOptions{
-		CallbackUrl: callbackUrl.String(),
-		State:       encodedUrl,
-		Nonce:       nonce,
-		IssuedAt:    issuedAt,
+		CallbackUrl: url.QueryEscape(callbackUrl.String()),
+		State:       url.QueryEscape(state),
+		Nonce:       url.QueryEscape(nonce),
+		IssuedAt:    url.QueryEscape(issuedAt),
 	})
 
 	if err != nil {
