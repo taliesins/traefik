@@ -82,7 +82,7 @@ var redirectToSsoPageTemplate = template.Must(template.New("RedirectToSsoPage").
 <!DOCTYPE html><html><head><title></title></head><body>
 {{.ErrorMessage}}
 <script>
-window.location = '{{ .RedirectUrl | escapeJavascriptVariable }}'
+window.location.replace('{{ .RedirectUrl | escapeJavascriptVariable }}');
 </script>
 Please sign in at <a href='{{.RedirectUrl | escapeAttribute}}'>{{ .RedirectUrl | escapeHtml}}</a>
 </body></html>

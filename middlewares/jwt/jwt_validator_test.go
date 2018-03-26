@@ -703,7 +703,7 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	expectedRedirectUri.Path = callbackPath
 
 
-	expectedBodyRegex, err := regexp.Compile("\n<!DOCTYPE html><html><head><title></title></head><body>\n\n<script>\nwindow.location = '(.*)'\n</script>\nPlease sign in at <a href='(.*)'>(.*)</a>\n</body></html>\n\n")
+	expectedBodyRegex, err := regexp.Compile("\n<!DOCTYPE html><html><head><title></title></head><body>\n\n<script>\nwindow.location.replace\\('(.*)'\\);\n</script>\nPlease sign in at <a href='(.*)'>(.*)</a>\n</body></html>\n\n")
 	expectedBodyMatches := expectedBodyRegex.FindStringSubmatch(string(body))
 	assert.Len(t, expectedBodyMatches, 4, "Expect 4 matches")
 	bodyMatch := expectedBodyMatches[1]
