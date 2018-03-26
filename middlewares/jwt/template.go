@@ -125,7 +125,7 @@ function getBookMarkParameterByName(name, url) {
     return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
 
-state = encodeURIComponent(getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkParameterName}}'));
+state = getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkParameterName}}');
 if (state) {
 	document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
 	window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);

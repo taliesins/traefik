@@ -818,7 +818,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkFailure(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
-	expectedBody := fmt.Sprintf("\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = encodeURIComponent(getBookMarkParameterByName('state'));\nif (state) {\n\tdocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\n\twindow.location.replace('%s?' + state);\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n", expectedRedirectorUrl)
+	expectedBody := fmt.Sprintf("\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = getBookMarkParameterByName('state');\nif (state) {\n\tdocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\n\twindow.location.replace('%s?' + state);\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n", expectedRedirectorUrl)
 
 	assert.EqualValues(t, expectedBody, string(body), "they should be equal")
 }
