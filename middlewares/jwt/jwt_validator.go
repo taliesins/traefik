@@ -262,10 +262,19 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				//public keys are calculated JIT as they are dynamic
 				if config.JwksAddress != "" {
 					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
+					if err != nil {
+						log.Infof("Unable to get public key from jwks address %s for kid %s with error %s", config.JwksAddress, kid, err)
+					}
 				} else if config.DiscoveryAddress != "" {
 					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
+					if err != nil {
+						log.Infof("Unable to get public key from discovery address %s for kid %s with error %s", config.DiscoveryAddress, kid, err)
+					}
 				} else if config.Issuer != "" {
 					publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
+					if err != nil {
+						log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+					}
 				}
 
 				if err != nil {
