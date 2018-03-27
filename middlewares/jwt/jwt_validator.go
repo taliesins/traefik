@@ -105,6 +105,12 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return
 			}
 
+			if strings.HasPrefix(r.URL.Path, redirectorPath) {
+				//Prevent endless loop if callback address, no one should be calling this directly without an id_token set
+				http.Error(w, "", http.StatusUnauthorized)
+				return
+			}
+
 			nonce := uuid.Get()
 			issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 
@@ -220,6 +226,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 			// If kid exists then we using dynamic public keys
 			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "") {
+				/*
 				claims := token.Claims.(jwt.MapClaims)
 
 				iss := ""
@@ -233,6 +240,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				}
 
 				//Todo: Add all the validations required
+
 				if config.Issuer != "" && iss != config.Issuer {
 					return nil, fmt.Errorf("Cannot validate iss claim")
 				}
@@ -240,6 +248,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				if config.Audience != "" && aud != config.Audience {
 					return nil, fmt.Errorf("Cannot validate audience claim")
 				}
+				*/
 
 				var (
 					err       error
