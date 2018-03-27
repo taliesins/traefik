@@ -3,6 +3,7 @@ package jwt
 import (
 	"fmt"
 	"github.com/auth0/go-jwt-middleware"
+	"github.com/containous/traefik/log"
 	"github.com/containous/traefik/middlewares/tracing"
 	"github.com/containous/traefik/server/uuid"
 	"github.com/containous/traefik/types"
@@ -54,6 +55,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	if config.SsoAddressTemplate != "" {
 		ssoRedirectUrlTemplate, err = getSsoRedirectUrlTemplate(config.SsoAddressTemplate)
 		if err != nil {
+			log.Errorf("Unable to parse config SsoAddressTemplate: %s", err)
 			return nil, err
 		}
 	} else {
@@ -73,6 +75,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	if config.PublicKey != "" {
 		publicKey, _, err = GetPublicKeyFromFileOrContent(config.PublicKey)
 		if err != nil {
+			log.Errorf("Unable to parse config PublicKey: %s", err)
 			return nil, err
 		}
 	} else {
@@ -92,6 +95,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	if config.UrlMacPrivateKey != "" {
 		urlHashPrivateKey, _, err = GetPrivateKeyFromFileOrContent(config.UrlMacPrivateKey)
 		if err != nil {
+			log.Errorf("Unable to parse config UrlMacPrivateKey: %s", err)
 			return nil, err
 		}
 	} else {
@@ -279,7 +283,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	jwtHandlerFunc := func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 		//Todo: White list of paths that do not have to be authenticated
 
-		if strings.HasPrefix(r.URL.Path, robotsPath) {
+		if r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, robotsPath) {
 			w.WriteHeader(http.StatusOK)
 			fmt.Fprint(w, "User-agent: *\nDisallow: /")
 			return
@@ -287,23 +291,27 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 		err := jwtMiddleware.CheckJWT(w, r)
 
-		if err == nil && strings.HasPrefix(r.URL.Path, redirectorPath) {
+		if err == nil && r.URL != nil && strings.HasPrefix(r.URL.Path, redirectorPath) {
 			// Unauthorized page with javascript to capture id_token from bookmark has run and redirected here
 			var redirectUrl *url.URL
+
 			if urlHashPrivateKey != nil {
 				redirectUrl, err = getRedirectUrl(r, urlHashPrivateKey)
 			} else if urlHashClientSecret != nil {
 				redirectUrl, err = getRedirectUrl(r, urlHashClientSecret)
 			} else {
-				http.Error(w, "", http.StatusUnauthorized)
-				return
+				err = fmt.Errorf("No url hash validation private key or url hash client secret is set")
 			}
-			if err != nil {
-				http.Error(w, "", http.StatusUnauthorized)
+
+			if err == nil && redirectUrl != nil {
+				log.Infof("provided id_token passed validation, redirecting to: %s", redirectUrl.String())
+				http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
 				return
 			}
 
-			http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
+			//More then likely there is something wrong with the validation rules of the issues id_token (issuer could be incorrectly configured)
+			log.Infof("provided id_token failed validation: %s", err)
+			http.Error(w, "", http.StatusUnauthorized)
 			return
 		}
 
