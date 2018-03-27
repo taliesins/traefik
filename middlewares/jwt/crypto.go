@@ -39,28 +39,19 @@ func init() {
 	lruCache = l
 }
 
-func GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string) (jwksUri string, err error) {
-	// Try to get and return existing entry from cache. If cache is expired,
-	// it will try proceed with rest of the function call
-	cached, ok := lruCache.Get(openIdConnectDiscoveryUri)
-	if ok {
-		jwksUri := cached.(*openIdConnectDiscoveryCacheValue).JwksUri
-		return jwksUri, nil
-	}
-
+func DownloadOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string)(string, error){
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Get(openIdConnectDiscoveryUri)
-
 	if err != nil {
-		return "", fmt.Errorf("json validation error: %s", err)
+		return "", err
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("json validation error: %s", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
@@ -70,10 +61,28 @@ func GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string) (
 		return "", err
 	}
 
-	jwksUri, ok = data["jwks_uri"].(string)
+	jwksUri, ok := data["jwks_uri"].(string)
 
 	if !ok {
 		return "", fmt.Errorf("json does not contain jwks_uri: %s", err)
+	}
+
+	return jwksUri, nil
+}
+
+func GetJwksUriFromOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri string) (jwksUri string, err error) {
+	// Try to get and return existing entry from cache. If cache is expired,
+	// it will try proceed with rest of the function call
+	cached, ok := lruCache.Get(openIdConnectDiscoveryUri)
+	if ok {
+		jwksUri = cached.(*openIdConnectDiscoveryCacheValue).JwksUri
+		return jwksUri, nil
+	}
+
+	jwksUri, err = DownloadOpenIdConnectDiscoveryUri(openIdConnectDiscoveryUri)
+
+	if err != nil {
+		return "", err
 	}
 
 	lruCache.Add(openIdConnectDiscoveryUri, &openIdConnectDiscoveryCacheValue{
@@ -108,6 +117,31 @@ func GetPublicKeyFromIssuerUri(kid string, issuerUri string) (interface{}, x509.
 	return GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, openIdConnectDiscoveryUri.String())
 }
 
+func DownloadJwksUri(jwksUri string)(*jose.JsonWebKeySet, error){
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: tr}
+	resp, err := client.Get(jwksUri)
+	if err != nil {
+		return nil, err
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	jwks := &jose.JsonWebKeySet{}
+	err = json.Unmarshal(body, jwks)
+	if err != nil {
+		return nil, err
+	}
+
+	return jwks, nil
+}
+
 func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.SignatureAlgorithm, error) {
 	cacheKey := fmt.Sprintf("%s|%s", jwksUri, kid)
 
@@ -124,28 +158,15 @@ func GetPublicKeyFromJwksUri(kid string, jwksUri string) (interface{}, x509.Sign
 		}
 	}
 
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: tr}
-	resp, err := client.Get(jwksUri)
-	if err != nil {
-		return nil, x509.UnknownSignatureAlgorithm, err
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, x509.UnknownSignatureAlgorithm, err
-	}
-	defer resp.Body.Close()
-
-	jwks := &jose.JsonWebKeySet{}
-	err = json.Unmarshal(body, jwks)
+	jwks, err := DownloadJwksUri(jwksUri)
 	if err != nil {
 		return nil, x509.UnknownSignatureAlgorithm, err
 	}
 
 	publicKey, signingAlgorithm, err := GetPublicKeyFromJwks(jwks, kid)
+	if err != nil {
+		return nil, x509.UnknownSignatureAlgorithm, err
+	}
 
 	lruCache.Add(cacheKey, &jwksCacheValue{
 		SigningAlgorithm: signingAlgorithm,
@@ -207,16 +228,20 @@ func GetPrivateKeyFromPem(privateKeyPemData []byte) (interface{}, error){
 }
 
 func GetPublicKeyFromJwks(jwks *jose.JsonWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
-	key := jwks.Key(kid)[0]
-	if !key.Valid() {
-		return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("invalid JWKS key")
+	for _, key := range jwks.Keys {
+		if key.KeyID == kid {
+			if !key.Valid() {
+				return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("invalid JWKS key")
+			}
+			if len(key.Certificates) > 0 {
+				return key.Key, key.Certificates[0].SignatureAlgorithm, nil
+			} else {
+				return key.Key, x509.UnknownSignatureAlgorithm, nil
+			}
+		}
 	}
 
-	if len(key.Certificates) > 0 {
-		return key.Key, key.Certificates[0].SignatureAlgorithm, nil
-	} else {
-		return key.Key, x509.UnknownSignatureAlgorithm, nil
-	}
+	return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("JsonWebKeySet does not contain key with kid = %s", kid)
 }
 
 func GetPublicKeyFromPem(publicKeyPemData []byte) (interface{}, x509.SignatureAlgorithm, error){
