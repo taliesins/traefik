@@ -3,6 +3,7 @@ package middlewares
 import (
 	"net/http"
 
+	"github.com/go-errors/errors"
 	"github.com/containous/traefik/log"
 	"github.com/urfave/negroni"
 )
@@ -25,9 +26,11 @@ func NegroniRecoverHandler() negroni.Handler {
 	return negroni.HandlerFunc(fn)
 }
 
+
 func recoverFunc(w http.ResponseWriter) {
 	if err := recover(); err != nil {
-		log.Errorf("Recovered from panic in http handler: %+v", err)
+		log.Errorf("Recovered from panic in http handler: %+v", errors.Wrap(err, 2).ErrorStack())
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
+

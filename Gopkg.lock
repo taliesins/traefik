@@ -71,12 +71,6 @@
   revision = "6add9cd6ad42d389d6ead1dde60b4ad71e46fd74"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/Cimpress-MCP/go-jwks-api-auth"
-  packages = ["."]
-  revision = "41103e412e7a92e81a0e7ca071b1ca977a9d7d60"
-
-[[projects]]
   name = "github.com/JamesClonk/vultr"
   packages = ["lib"]
   revision = "2fd0705ce648e602e6c9c57329a174270a4f6688"
@@ -571,6 +565,12 @@
   packages = ["."]
   revision = "ca0bf163426aa183d03fd4949101785c0347f273"
   source = "github.com/containous/check"
+
+[[projects]]
+  name = "github.com/go-errors/errors"
+  packages = ["."]
+  revision = "3afebba5a48dbc89b574d890b6b34d9ee10b4785"
+  version = "v1.0.0"
 
 [[projects]]
   name = "github.com/go-ini/ini"
@@ -1069,6 +1069,15 @@
   packages = ["difflib"]
   revision = "792786c7400a136282c1664665ae0a8db921c6c2"
   version = "v1.0.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/pquerna/cachecontrol"
+  packages = [
+    ".",
+    "cacheobject"
+  ]
+  revision = "525d0eb5f91d30e3b1548de401b7ef9ea6898520"
 
 [[projects]]
   name = "github.com/prometheus/client_golang"

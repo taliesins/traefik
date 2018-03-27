@@ -272,3 +272,6 @@
 [[constraint]]
   branch = "master"
   name = "github.com/auth0/go-jwt-middleware"
+[[constraint]]
+  name = "github.com/go-errors/errors"
+  version = "1.0.0"
