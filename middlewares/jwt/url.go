@@ -1,9 +1,9 @@
 package jwt
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
-	"fmt"
 )
 
 var callbackPath = "/oauth2/callback"
@@ -18,13 +18,14 @@ var hashQuerystringParameterName = "hash"
 var idTokenBookmarkParameterName = "id_token"
 var stateBookmarkParameterName = "state"
 
-func cloneUrl(r *http.Request)(*url.URL){
+func cloneUrl(r *http.Request) *url.URL {
 	clonedUrl := &url.URL{
-		Scheme: r.URL.Scheme,
-		Opaque: r.URL.Opaque,
-		User:   r.URL.User,
-		Host:   r.URL.Host,
-		Path:   r.URL.Path,
+		Scheme:   r.URL.Scheme,
+		Opaque:   r.URL.Opaque,
+		User:     r.URL.User,
+		Host:     r.URL.Host,
+		Path:     r.URL.Path,
+		RawQuery: r.URL.RawQuery,
 	}
 
 	if clonedUrl.Host == "" {
@@ -42,7 +43,7 @@ func cloneUrl(r *http.Request)(*url.URL){
 	return clonedUrl
 }
 
-func addMacHashToUrl(url *url.URL, key interface{}) (error) {
+func addMacHashToUrl(url *url.URL, key interface{}) error {
 	hash, err := SignMac(url.String(), key)
 	if err != nil {
 		return err
@@ -53,7 +54,7 @@ func addMacHashToUrl(url *url.URL, key interface{}) (error) {
 	return nil
 }
 
-func verifyAndStripMacHashFromUrl(url *url.URL, key interface{})(error){
+func verifyAndStripMacHashFromUrl(url *url.URL, key interface{}) error {
 	query := url.Query()
 
 	signature := query.Get(hashQuerystringParameterName)

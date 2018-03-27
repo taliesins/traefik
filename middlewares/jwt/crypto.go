@@ -287,7 +287,7 @@ func SignMac(signingString string, key interface{}) (string, error){
 	switch privateKeyType := key.(type) {
 	case *rsa.PrivateKey:
 		{
-			return jwt.SigningMethodPS256.Sign(signingString, privateKeyType)
+			return jwt.SigningMethodRS256.Sign(signingString, privateKeyType)
 
 		}
 	case *ecdsa.PrivateKey:
@@ -304,21 +304,21 @@ func SignMac(signingString string, key interface{}) (string, error){
 }
 
 func VerifyMac(signingString string, signature string, key interface{}) (error){
-	switch privateKeyType := key.(type) {
-	case *rsa.PrivateKey:
+	switch publicKeyType := key.(type) {
+	case *rsa.PublicKey:
 		{
-			return jwt.SigningMethodPS256.Verify(signingString, signature, privateKeyType)
+			return jwt.SigningMethodRS256.Verify(signingString, signature, publicKeyType)
 
 		}
-	case *ecdsa.PrivateKey:
+	case *ecdsa.PublicKey:
 		{
-			return jwt.SigningMethodES256.Verify(signingString, signature, privateKeyType)
+			return jwt.SigningMethodES256.Verify(signingString, signature, publicKeyType)
 		}
 	case []byte:
 		{
 			return jwt.SigningMethodHS256.Verify(signingString, signature, key)
 		}
 	default:
-		return fmt.Errorf("Unsupported key type %T", privateKeyType)
+		return fmt.Errorf("Unsupported key type %T", publicKeyType)
 	}
 }
