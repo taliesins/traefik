@@ -103,7 +103,7 @@ func getPublicKeyForTest(relativePathToCert string) (interface{}, error){
 	return publicKey, nil
 }
 
-func TestAddHashAndRemoveHashUsingPrivateKeySuccess(t *testing.T) {
+func TestAddHashAndRemoveHashUsingPrivateKeyAndPublicKeySuccess(t *testing.T) {
 	testUrl, err := url.Parse("https://127.0.0.1/test/do.aspx?param1=value1&param2=value2&param3=value3")
 	if err != nil {
 		panic(err)
@@ -118,6 +118,23 @@ func TestAddHashAndRemoveHashUsingPrivateKeySuccess(t *testing.T) {
 	publicKey, err := getPublicKeyForTest("../../integration/fixtures/https/snitest.com")
 
 	err = verifyAndStripMacHashFromUrl(testUrl, publicKey)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func TestAddHashAndRemoveHashUsingPrivateKeyOnlySuccess(t *testing.T) {
+	testUrl, err := url.Parse("https://127.0.0.1/test/do.aspx?param1=value1&param2=value2&param3=value3")
+	if err != nil {
+		panic(err)
+	}
+
+	privateKey, err := getPrivateKeyForTest("../../integration/fixtures/https/snitest.com")
+	err = addMacHashToUrl(testUrl, privateKey)
+	if err != nil {
+		panic(err)
+	}
+	err = verifyAndStripMacHashFromUrl(testUrl, privateKey)
 	if err != nil {
 		panic(err)
 	}

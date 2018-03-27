@@ -25,6 +25,9 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
+	"strconv"
+	"github.com/containous/traefik/server/uuid"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -791,7 +794,8 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
 	ts := httptest.NewServer(n)
 	defer ts.Close()
 
-	client := &http.Client{}
+	client := &http.Client{
+	}
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -873,7 +877,7 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	defer jwksServer.Close()
 
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
+		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
 	}
 
 	jwtConfiguration := &types.Jwt{}
@@ -892,7 +896,11 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	ts := httptest.NewServer(n)
 	defer ts.Close()
 
-	client := &http.Client{}
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -905,11 +913,11 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 
 	clientRequestUrl.Scheme = "http"
 
-	iat := ""
-	nonce := ""
+	nonce := uuid.Get()
+	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 
 	//Work out the url that the SSO would redirect back to
-	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, iat, nonce, url.QueryEscape(clientRequestUrl.String())))
+	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
 	if err != nil {
 		panic(err)
 	}
@@ -950,12 +958,9 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
-
+	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
 	body, err := ioutil.ReadAll(res.Body)
-
-	expectedBodyTemplate := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = getBookMarkParameterByName('state');\nif (state) {\n\tdocument.cookie = 'id_token=' + getBookMarkParameterByName('id_token');\n\twindow.location.replace('%s?' + state);\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
-	assert.EqualValues(t, fmt.Sprintf(expectedBodyTemplate, expectedRedirectorUrl), string(body), "Should be equal")
+	assert.EqualValues(t, fmt.Sprintf("<a href=\"%s\">See Other</a>.\n\n", clientRequestUrl), string(body), "Should be equal")
 }
 
 func templateToRegexFixer(template string)(string){

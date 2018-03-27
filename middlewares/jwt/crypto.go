@@ -305,6 +305,15 @@ func SignMac(signingString string, key interface{}) (string, error){
 
 func VerifyMac(signingString string, signature string, key interface{}) (error){
 	switch publicKeyType := key.(type) {
+	case *rsa.PrivateKey:
+		{
+			return jwt.SigningMethodRS256.Verify(signingString, signature, &publicKeyType.PublicKey)
+
+		}
+	case *ecdsa.PrivateKey:
+		{
+			return jwt.SigningMethodES256.Verify(signingString, signature, &publicKeyType.PublicKey)
+		}
 	case *rsa.PublicKey:
 		{
 			return jwt.SigningMethodRS256.Verify(signingString, signature, publicKeyType)
