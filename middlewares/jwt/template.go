@@ -127,8 +127,11 @@ function getBookMarkParameterByName(name, url) {
 
 state = getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkParameterName}}');
 if (state) {
-	document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
-	window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);
+	idToken = getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
+	if (idToken) {
+		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + idToken;
+		window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);
+	}
 }
 </script>
 Please change the '#' in the url to '&' and goto link
