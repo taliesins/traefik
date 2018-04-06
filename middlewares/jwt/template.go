@@ -129,7 +129,7 @@ state = getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkPa
 if (state) {
 	idToken = getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
 	if (idToken) {
-		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + idToken;
+		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + idToken + ';domain=' + document.domain + ';path=/;secure;';
 		window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);
 	}
 }

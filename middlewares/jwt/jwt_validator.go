@@ -314,8 +314,17 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 			if err == nil && redirectUrl != nil {
 				log.Infof("provided id_token passed validation, redirecting to: %s", redirectUrl.String())
-				http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
-				return
+
+				sessionCookie, err := r.Cookie(sessionCookieName)
+				if err == nil {
+					sessionCookie.HttpOnly = true
+					sessionCookie.Secure = true
+					sessionCookie.Domain = r.URL.Hostname()
+					sessionCookie.Path = "/"
+					http.SetCookie(w, sessionCookie)
+					http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
+					return
+				}
 			}
 
 			//More then likely there is something wrong with the validation rules of the issues id_token (issuer could be incorrectly configured)
