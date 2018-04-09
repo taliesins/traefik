@@ -822,8 +822,9 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 
-	expectedBodyTemplate := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = getBookMarkParameterByName('state');\nif (state) {\n\tid_token = getBookMarkParameterByName('id_token');\n\tif (id_token) {\n\n\t\tdocument.cookie = 'id_token=' + id_token + '; domain=' + document.domain + '; path=/; secure';\n\t\twindow.location.replace('%s?' + state);\n\n\t}\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
-	
+//	expectedBodyTemplate := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nstate = getBookMarkParameterByName('state');\nif (state) {\n\tid_token = getBookMarkParameterByName('id_token');\n\tif (id_token) {\n\n\t\tdocument.cookie = 'id_token=' + id_token + '; domain=' + document.domain + '; path=/; secure';\n\t\twindow.location.replace('%s?' + state);\n\n\t}\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
+	expectedBodyTemplate := "\n<!DOCTYPE html><html><head><title></title></head><body>\n<script>\nfunction getBookMarkParameterByName(name, url) {\n    if (!url) url = window.location.hash;\n    name = name.replace(/[\\[\\]]/g, \"\\\\$&\");\n    var regex = new RegExp(\"[#&?]\" + name + \"(=([^&#]*)|&|#|$)\"), results = regex.exec(url);\n    if (!results) return null;\n    if (!results[2]) return '';\n    return decodeURIComponent(results[2].replace(/\\+/g, \" \"));\n}\n\nfunction post(path, params, method) {\n    method = method || \"post\"; // Set method to post by default if not specified.\n\n    // The rest of this code assumes you are not using a library.\n    // It can be made less wordy if you use one.\n    var form = document.createElement(\"form\");\n    form.setAttribute(\"method\", method);\n    form.setAttribute(\"action\", path);\n\n    for(var key in params) {\n        if(params.hasOwnProperty(key)) {\n            var hiddenField = document.createElement(\"input\");\n            hiddenField.setAttribute(\"type\", \"hidden\");\n            hiddenField.setAttribute(\"name\", key);\n            hiddenField.setAttribute(\"value\", params[key]);\n\n            form.appendChild(hiddenField);\n        }\n    }\n\n    document.body.appendChild(form);\n    form.submit();\n}\n\nstate = getBookMarkParameterByName('state');\nif (state) {\n\tid_token = getBookMarkParameterByName('id_token');\n\tif (id_token) {\n\n\t\tpost('%s?' + state, {id_token: id_token});\n\n\t}\n}\n</script>\nPlease change the '#' in the url to '&' and goto link\n</body></html>\n\n"
+
 	assert.EqualValues(t, fmt.Sprintf(expectedBodyTemplate, expectedRedirectorUrl), string(body), "Should be equal")
 }
 
@@ -953,8 +954,6 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	cookie := &http.Cookie{
 		Name:  sessionCookieName,
 		Value: signedToken,
-		//Path:"", //TODO: should we be validating the path?
-		//Domain:"", //TODO: should we be validating the domain
 	}
 	req.AddCookie(cookie)
 
@@ -1092,8 +1091,6 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 	cookie := &http.Cookie{
 		Name:  sessionCookieName,
 		Value: signedToken,
-		//Path:"", //TODO: should we be validating the path?
-		//Domain:"", //TODO: should we be validating the domain
 	}
 	req.AddCookie(cookie)
 
@@ -1103,6 +1100,138 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
 	body, err := ioutil.ReadAll(res.Body)
 	assert.EqualValues(t, fmt.Sprintf("<a href=\"%s\">See Other</a>.\n\n", clientRequestUrl), string(body), "Should be equal")
+}
+
+func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
+	_, filename, _, _ := runtime.Caller(0)
+	certPath := path.Join(path.Dir(filename), "signing/rsa")
+
+	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
+	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
+		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
+	}
+
+	privateKeyPath := fmt.Sprintf("%s.key", certPath)
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(publicKeyPath),
+		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
+	}
+
+	if !certificate.CertFile.IsPath() {
+		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
+	}
+
+	if !certificate.KeyFile.IsPath() {
+		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if err != nil {
+		panic(err)
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if err != nil {
+		panic(err)
+	}
+
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.RequestURI == oidcDiscoveryUriPath {
+			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if r.RequestURI == jwksUriPath {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+	defer jwksServer.Close()
+
+	jwtConfiguration := &types.Jwt{}
+	jwtConfiguration.Issuer = jwksServer.URL
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	if err != nil {
+		panic(err)
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
+	})
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	ts := httptest.NewTLSServer(n)
+	defer ts.Close()
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	clientRequestUrl, err := url.Parse(ts.URL)
+	if err != nil {
+		panic(err)
+	}
+
+	if clientRequestUrl.Path == ""{
+		clientRequestUrl.Path = "/"
+	}
+
+	clientRequestUrl.Scheme = "https"
+
+	nonce := uuid.Get()
+	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+	//Work out the url that the SSO would redirect back to
+	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
+	if err != nil {
+		panic(err)
+	}
+
+	//Need the signing key to use for mac of url, so just use the one we use for JWT
+	privateKeyPemData, err := certificate.KeyFile.Read()
+	if err != nil {
+		panic(err)
+	}
+
+	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
+	if err != nil {
+		panic(err)
+	}
+
+	addMacHashToUrl(expectedRedirectorUrl, privateKey)
+
+	claims := &jwt.StandardClaims{}
+	claims.Issuer = jwksServer.URL
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = "0"
+
+	signedToken, err := token.SignedString(privateKey)
+	if err != nil {
+		panic(err)
+	}
+
+	req := testhelpers.MustNewRequest(http.MethodPost, expectedRedirectorUrl.String(), strings.NewReader("id_token=" + signedToken))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
+	body, err := ioutil.ReadAll(res.Body)
+	assert.EqualValues(t, "", string(body), "Should be equal")
 }
 
 func templateToRegexFixer(template string)(string){

@@ -193,7 +193,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
 			if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
 				err = r.ParseForm()
-				if err != nil {
+				if err == nil {
 					token = r.Form.Get("id_token")
 					if token != "" {
 						return token, nil
@@ -325,7 +325,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			//Get id_token from form post
 			if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
 				err = r.ParseForm()
-				if err != nil {
+				if err == nil {
 					token = r.Form.Get("id_token")
 				}
 			}

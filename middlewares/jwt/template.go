@@ -179,7 +179,7 @@ func renderSsoCallbackPageTemplate(redirectorUrl *url.URL) (string, error) {
 	var idTokenInBookmarkRedirectPageTemplateRendered bytes.Buffer
 	err = ssoCallbackPageTemplate.Execute(&idTokenInBookmarkRedirectPageTemplateRendered, ssoCallbackPageTemplateOptions{
 		RedirectorUrl:                redirectorUrlWithoutQuerystring.String(),
-		UseCookieRedirect:			  true,
+		UseCookieRedirect:			  false,
 		SessionCookieName:            sessionCookieName,
 		IdTokenBookmarkParameterName: idTokenBookmarkParameterName,
 		StateBookmarkParameterName:   stateBookmarkParameterName,
