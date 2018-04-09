@@ -157,7 +157,7 @@ if (state) {
 {{ if not .UseCookieRedirect }}
 		post('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state, {id_token: id_token});
 {{ else }}
-		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + id_token + ';domain=' + document.domain + ';path=/;secure;';
+		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + id_token + '; domain=' + document.domain + '; path=/; secure';
 		window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);
 {{ end }}
 	}
