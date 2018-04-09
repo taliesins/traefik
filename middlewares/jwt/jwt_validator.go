@@ -190,15 +190,22 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				}
 			}
 
+			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
+			if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
+				err = r.ParseForm()
+				if err != nil {
+					token = r.Form.Get("id_token")
+					if token != "" {
+						return token, nil
+					}
+				}
+			}
+
+			//For people without javascript
 			query := r.URL.Query()
 			token = query.Get("id_token")
 			if token != "" {
 				return token, nil
-			}
-
-			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
-			if strings.HasPrefix(r.URL.Path, callbackPath) {
-				//TODO: SSO posts back the id_token
 			}
 
 			return "", nil
@@ -312,19 +319,50 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				err = fmt.Errorf("No url hash validation private key or url hash client secret is set")
 			}
 
-			if err == nil && redirectUrl != nil {
-				log.Infof("provided id_token passed validation, redirecting to: %s", redirectUrl.String())
+			//Was validated earlier so we know that its a valid value
+			token := ""
 
+			//Get id_token from form post
+			if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
+				err = r.ParseForm()
+				if err != nil {
+					token = r.Form.Get("id_token")
+				}
+			}
+
+			if token == "" {
+				//For people without javascript
+				query := r.URL.Query()
+				token = query.Get("id_token")
+			}
+
+			if token == "" {
+				//For people who have it set in a cookie
 				sessionCookie, err := r.Cookie(sessionCookieName)
 				if err == nil {
-					sessionCookie.HttpOnly = true
-					sessionCookie.Secure = true
-					sessionCookie.Domain = r.URL.Hostname()
-					sessionCookie.Path = "/"
-					http.SetCookie(w, sessionCookie)
-					http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
-					return
+					token = sessionCookie.Value
 				}
+			}
+
+			if token == "" {
+				err = fmt.Errorf("Unable to get id_token from form")
+			}
+
+			if err == nil && redirectUrl != nil && token != "" {
+				log.Infof("provided id_token passed validation, redirecting to: %s", redirectUrl.String())
+
+				sessionCookie := http.Cookie{
+					Name:sessionCookieName,
+					Value: token,
+					HttpOnly: true,
+					Secure: true,
+					Domain: r.URL.Hostname(),
+					Path: "/",
+				}
+
+				http.SetCookie(w, &sessionCookie)
+				http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
+				return
 			}
 
 			//More then likely there is something wrong with the validation rules of the issues id_token (issuer could be incorrectly configured)

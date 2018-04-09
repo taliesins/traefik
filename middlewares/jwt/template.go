@@ -104,6 +104,7 @@ func renderRedirectToSsoPageTemplate(redirectUrl *url.URL, errorMessage string) 
 
 type ssoCallbackPageTemplateOptions struct {
 	RedirectorUrl                string
+	UseCookieRedirect			 bool
 	SessionCookieName            string
 	IdTokenBookmarkParameterName string
 	StateBookmarkParameterName   string
@@ -124,13 +125,41 @@ function getBookMarkParameterByName(name, url) {
     if (!results[2]) return '';
     return decodeURIComponent(results[2].replace(/\+/g, " "));
 }
+{{ if not .UseCookieRedirect }}
+function post(path, params, method) {
+    method = method || "post"; // Set method to post by default if not specified.
 
+    // The rest of this code assumes you are not using a library.
+    // It can be made less wordy if you use one.
+    var form = document.createElement("form");
+    form.setAttribute("method", method);
+    form.setAttribute("action", path);
+
+    for(var key in params) {
+        if(params.hasOwnProperty(key)) {
+            var hiddenField = document.createElement("input");
+            hiddenField.setAttribute("type", "hidden");
+            hiddenField.setAttribute("name", key);
+            hiddenField.setAttribute("value", params[key]);
+
+            form.appendChild(hiddenField);
+        }
+    }
+
+    document.body.appendChild(form);
+    form.submit();
+}
+{{ end }}
 state = getBookMarkParameterByName('{{ escapeJavascriptVariable .StateBookmarkParameterName}}');
 if (state) {
-	idToken = getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
-	if (idToken) {
-		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + idToken + ';domain=' + document.domain + ';path=/;secure;';
+	id_token = getBookMarkParameterByName('{{ escapeJavascriptVariable .IdTokenBookmarkParameterName}}');
+	if (id_token) {
+{{ if not .UseCookieRedirect }}
+		post('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state, {id_token: id_token});
+{{ else }}
+		document.cookie = '{{ escapeJavascriptVariable .SessionCookieName}}=' + id_token + ';domain=' + document.domain + ';path=/;secure;';
 		window.location.replace('{{ escapeJavascriptVariable .RedirectorUrl}}?' + state);
+{{ end }}
 	}
 }
 </script>
@@ -150,6 +179,7 @@ func renderSsoCallbackPageTemplate(redirectorUrl *url.URL) (string, error) {
 	var idTokenInBookmarkRedirectPageTemplateRendered bytes.Buffer
 	err = ssoCallbackPageTemplate.Execute(&idTokenInBookmarkRedirectPageTemplateRendered, ssoCallbackPageTemplateOptions{
 		RedirectorUrl:                redirectorUrlWithoutQuerystring.String(),
+		UseCookieRedirect:			  true,
 		SessionCookieName:            sessionCookieName,
 		IdTokenBookmarkParameterName: idTokenBookmarkParameterName,
 		StateBookmarkParameterName:   stateBookmarkParameterName,
