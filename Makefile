@@ -13,18 +13,18 @@ TRAEFIK_ENVS := \
 	-e CODENAME \
 	-e TESTDIRS \
 	-e CI \
-	-e CONTAINER=DOCKER		# Indicator for integration tests that we are running inside a container.
+	-e CONTAINER=DOCKER
+
+# Indicator for integration tests that we are running inside a container.
 
 SRCS = $(shell git ls-files '*.go' | grep -v '^vendor/')
-
 BIND_DIR := dist
 TRAEFIK_MOUNT := -v "$(CURDIR)/$(BIND_DIR):/go/src/github.com/containous/traefik/$(BIND_DIR):z"
-
 GIT_BRANCH := $(subst heads/,,$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null))
 TRAEFIK_DEV_IMAGE := traefik-dev$(if $(GIT_BRANCH),:$(subst /,-,$(GIT_BRANCH)))
 REPONAME := $(shell echo $(REPO) | tr '[:upper:]' '[:lower:]')
 TRAEFIK_IMAGE := $(if $(REPONAME),$(REPONAME),"containous/traefik")
-INTEGRATION_OPTS := $(if $(MAKE_DOCKER_HOST),-e "DOCKER_HOST=$(MAKE_DOCKER_HOST)", -e "TEST_CONTAINER=1" -v "/var/run/docker.sock:/var/run/docker.sock")
+INTEGRATION_OPTS := $(if $(MAKE_DOCKER_HOST),-e "DOCKER_HOST=$(MAKE_DOCKER_HOST)",$(if $(wildcard /var/run/docker.sock),-e "TEST_CONTAINER=1" -v "/var/run/docker.sock:/var/run/docker.sock",-e "DOCKER_HOST=http://localhost:2375"))
 TRAEFIK_DOC_IMAGE := traefik-docs
 TRAEFIK_DOC_VERIFY_IMAGE := $(TRAEFIK_DOC_IMAGE)-verify
 
@@ -131,9 +131,9 @@ run-dev:
 	./traefik
 
 generate-webui: build-webui
-	mkdir -p "$(CURDIR)/static"; \
-	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui /bin/bash -c "rm -rf /src/static || true && npm run build"; \
-	echo 'For more informations show `webui/readme.md`' > $(CURDIR)/static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md; \
+	if [ ! -d "$(CURDIR)/static" ]; then mkdir -p "$(CURDIR)/static";fi
+	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui /bin/bash npm run build 
+	echo 'For more informations show `webui/readme.md`' > $(CURDIR)/static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md 
 
 lint:
 	script/validate-golint
