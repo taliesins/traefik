@@ -42,6 +42,120 @@ const (
 	TokenMethodCookie
 )
 
+func templateToRegexFixer(template string)(string){
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		//".", "\\.", // will break {{.Url}}
+		//"{", "\\{", // will break {{.Url}}
+		"/", "\\/",
+		"^", "\\^",
+		"$", "\\$",
+		"*", "\\*",
+		"+", "\\+",
+		"?", "\\?",
+		"(", "\\(",
+		")", "\\)",
+		"[", "\\[",
+		"|", "\\|",
+	)
+
+	return replacer.Replace(template)
+}
+
+func getCertificateFromPath(publicKeyRootPath string, privateKeyRootPath string)(*traefiktls.Certificate, error){
+	_, filename, _, _ := runtime.Caller(0)
+
+	publicKeyPath := fmt.Sprintf("%s.crt", path.Join(path.Dir(filename), publicKeyRootPath))
+	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
+		publicKeyPath = fmt.Sprintf("%s.cert", path.Join(path.Dir(filename), publicKeyRootPath))
+	}
+
+	privateKeyPath := fmt.Sprintf("%s.key", path.Join(path.Dir(filename), privateKeyRootPath))
+
+	certificate := &traefiktls.Certificate{
+		CertFile: traefiktls.FileOrContent(publicKeyPath),
+		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
+	}
+
+	if !certificate.CertFile.IsPath() {
+		return nil, fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile))
+	}
+
+	if !certificate.KeyFile.IsPath() {
+		return nil, fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile))
+	}
+
+	return certificate, nil
+}
+
+func getCertificateFromPathAndJwksServer(publicKeyRootPath string, privateKeyRootPath string)(certificate *traefiktls.Certificate, server *httptest.Server, oidcDiscoveryUri *url.URL, jwksUri *url.URL, err error){
+	certificate, err = getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.RequestURI == oidcDiscoveryUriPath {
+			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if r.RequestURI == jwksUriPath {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+
+	oidcDiscoveryUri, err = url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath))
+	jwksUri, err = url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath))
+
+	return certificate, jwksServer, oidcDiscoveryUri, jwksUri, nil
+}
+
+func getMiddlewareServer(jwtConfiguration *types.Jwt)(server *httptest.Server, err error){
+	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	if err != nil {
+		return nil, err
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
+	})
+
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	middlewareServer := httptest.NewTLSServer(n)
+
+	return middlewareServer, nil
+}
+
+func getClient()(*http.Client){
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return client
+}
+
 func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) error {
 	signingKey := []byte(clientSecret)
 
@@ -90,7 +204,7 @@ func runMiddleWareWithClientSecretSigning(handlerFunc func(http.ResponseWriter, 
 	ts := httptest.NewServer(n)
 	defer ts.Close()
 
-	client := &http.Client{}
+	client := getClient()
 
 	requestPath, err := url.Parse(path)
 	base, err := url.Parse(ts.URL)
@@ -207,7 +321,7 @@ func runMiddleWareWithCertificateSigning(handlerFunc func(http.ResponseWriter, *
 	ts := httptest.NewServer(n)
 	defer ts.Close()
 
-	client := &http.Client{}
+	client := getClient()
 
 	requestPath, err := url.Parse(path)
 	base, err := url.Parse(ts.URL)
@@ -225,41 +339,24 @@ func runMiddleWareWithCertificateSigning(handlerFunc func(http.ResponseWriter, *
 }
 
 func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), certificatePath)
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	certificate, err := getCertificateFromPath(certificatePath, certificatePath)
+	if err != nil {
+		panic(err)
 	}
 
 	certContent, err := certificate.CertFile.Read()
 	if err != nil {
 		panic(err)
 	}
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
 
 	kid := ""
 	claims := &jwt.StandardClaims{}
 	jwtConfiguration := &types.Jwt{
 		PublicKey: string(certContent),
+	}
+
+	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
 	}
 
 	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
@@ -273,40 +370,24 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 }
 
 func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, publicKeyRootPath string, privateKeyRootPath string, tokenMethod TokenMethod) {
-	_, filename, _, _ := runtime.Caller(0)
-
-	publicKeyPath := fmt.Sprintf("%s.crt", path.Join(path.Dir(filename), publicKeyRootPath))
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", path.Join(path.Dir(filename), publicKeyRootPath))
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", path.Join(path.Dir(filename), privateKeyRootPath))
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
+	certificate, err := getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
+	if err != nil {
+		panic(err)
 	}
 
 	certContent, err := certificate.CertFile.Read()
 	if err != nil {
 		panic(err)
 	}
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
 
 	kid := ""
 	claims := &jwt.StandardClaims{}
 	jwtConfiguration := &types.Jwt{
 		PublicKey: string(certContent),
+	}
+
+	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "traefik")
 	}
 
 	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
@@ -355,60 +436,10 @@ func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JsonWebKeySet, er
 }
 
 func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), certificatePath)
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, oidcDiscoveryUri, jwksUri, err := getCertificateFromPathAndJwksServer(certificatePath, certificatePath)
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			var scheme string
-			if r.TLS != nil {
-				scheme = "https"
-			} else {
-				scheme = "http"
-			}
-			jwksUri := fmt.Sprintf("%s://%s%s", scheme, r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
@@ -424,10 +455,10 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		jwtConfiguration.Issuer = jwksServer.URL
 	}
 	if setOidcDiscoveryUri {
-		jwtConfiguration.DiscoveryAddress = fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath)
+		jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
 	}
 	if setJwksUri {
-		jwtConfiguration.JwksAddress = fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath)
+		jwtConfiguration.JwksAddress = jwksUri.String()
 	}
 
 	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
@@ -557,54 +588,10 @@ func TestWithRS256UsingIssuerUriSuccess(t *testing.T) {
 }
 
 func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
@@ -629,54 +616,10 @@ func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
 }
 
 func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
@@ -725,78 +668,24 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 }
 
 func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
-
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
 
 	jwtConfiguration := &types.Jwt{}
 	jwtConfiguration.Issuer = jwksServer.URL
 	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	ts, err := getMiddlewareServer(jwtConfiguration)
 	if err != nil {
 		panic(err)
 	}
-
-	handler := http.HandlerFunc(handlerFunc)
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewServer(n)
 	defer ts.Close()
 
-	client := &http.Client{
-	}
+	client := getClient()
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -807,7 +696,7 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
 		clientRequestUrl.Path = "/"
 	}
 
-	clientRequestUrl.Scheme = "http"
+	clientRequestUrl.Scheme = "https"
 
 	//Work out the url that the SSO would redirect back to
 	redirectUrl := clientRequestUrl.String()
@@ -829,54 +718,10 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
 }
 
 func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	jwtConfiguration := &types.Jwt{}
@@ -884,27 +729,13 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	ts, err := getMiddlewareServer(jwtConfiguration)
 	if err != nil {
 		panic(err)
 	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
-	})
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewTLSServer(n)
 	defer ts.Close()
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := getClient()
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -939,8 +770,6 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 
 	addMacHashToUrl(expectedRedirectorUrl, privateKey)
 
-	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
-
 	claims := &jwt.StandardClaims{}
 	claims.Issuer = jwksServer.URL
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -950,6 +779,8 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
+
+	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
 
 	cookie := &http.Cookie{
 		Name:  sessionCookieName,
@@ -966,82 +797,24 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 }
 
 func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, oidcDiscoveryUri, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.DiscoveryAddress = fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath)
+	jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
 	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	ts, err := getMiddlewareServer(jwtConfiguration)
 	if err != nil {
 		panic(err)
 	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
-	})
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewTLSServer(n)
 	defer ts.Close()
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := getClient()
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -1076,8 +849,6 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 
 	addMacHashToUrl(expectedRedirectorUrl, privateKey)
 
-	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
-
 	claims := &jwt.StandardClaims{}
 	claims.Issuer = jwksServer.URL
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -1088,10 +859,13 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 		panic(err)
 	}
 
+	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
+
 	cookie := &http.Cookie{
 		Name:  sessionCookieName,
 		Value: signedToken,
 	}
+
 	req.AddCookie(cookie)
 
 	res, err := client.Do(req)
@@ -1102,55 +876,13 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 	assert.EqualValues(t, fmt.Sprintf("<a href=\"%s\">See Other</a>.\n\n", clientRequestUrl), string(body), "Should be equal")
 }
 
+
+
 func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
-	_, filename, _, _ := runtime.Caller(0)
-	certPath := path.Join(path.Dir(filename), "signing/rsa")
-
-	publicKeyPath := fmt.Sprintf("%s.crt", certPath)
-	if _, err := os.Stat(publicKeyPath); os.IsNotExist(err) {
-		publicKeyPath = fmt.Sprintf("%s.cert", certPath)
-	}
-
-	privateKeyPath := fmt.Sprintf("%s.key", certPath)
-
-	certificate := &traefiktls.Certificate{
-		CertFile: traefiktls.FileOrContent(publicKeyPath),
-		KeyFile:  traefiktls.FileOrContent(privateKeyPath),
-	}
-
-	if !certificate.CertFile.IsPath() {
-		panic(fmt.Errorf("CertFile path is invalid: %s", string(certificate.CertFile)))
-	}
-
-	if !certificate.KeyFile.IsPath() {
-		panic(fmt.Errorf("KeyFile path is invalid: %s", string(certificate.KeyFile)))
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
 	if err != nil {
 		panic(err)
 	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		panic(err)
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
 	defer jwksServer.Close()
 
 	jwtConfiguration := &types.Jwt{}
@@ -1158,27 +890,13 @@ func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
 	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
 
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	ts, err := getMiddlewareServer(jwtConfiguration)
 	if err != nil {
 		panic(err)
 	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
-	})
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewTLSServer(n)
 	defer ts.Close()
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := getClient()
 
 	clientRequestUrl, err := url.Parse(ts.URL)
 	if err != nil {
@@ -1234,23 +952,3 @@ func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
 	assert.EqualValues(t, "", string(body), "Should be equal")
 }
 
-func templateToRegexFixer(template string)(string){
-	replacer := strings.NewReplacer(
-		"\\", "\\\\",
-		//".", "\\.", // will break {{.Url}}
-		//"{", "\\{", // will break {{.Url}}
-		"/", "\\/",
-		"^", "\\^",
-		"$", "\\$",
-		"*", "\\*",
-		"+", "\\+",
-		"?", "\\?",
-		"(", "\\(",
-		")", "\\)",
-		"[", "\\[",
-		"|", "\\|",
-		)
-
-	return replacer.Replace(template)
-
-}
