@@ -132,7 +132,7 @@ run-dev:
 
 generate-webui: build-webui
 	mkdir -p static; \
-	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui rm -rf /src/static || true && npm run build; \
+	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui /bin/bash -c "rm -rf /src/static || true && npm run build"; \
 	echo 'For more informations show `webui/readme.md`' > $(CURDIR)/static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md; \
 
 lint:
