@@ -17,7 +17,7 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/negroni"
-	"gopkg.in/square/go-jose.v1"
+	"gopkg.in/square/go-jose.v2"
 	"os"
 	"path"
 	"reflect"
@@ -400,7 +400,7 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 	assert.NotEqual(t, "traefik\n", string(body), "they should not be equal")
 }
 
-func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JsonWebKeySet, error) {
+func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JSONWebKeySet, error) {
 	publicKeyPemData, err := certificate.CertFile.Read()
 	if err != nil {
 		return nil, err
@@ -421,8 +421,8 @@ func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JsonWebKeySet, er
 		return nil, fmt.Errorf("unknown private key type '%s'", reflect.TypeOf(key))
 	}
 
-	jsonWebKeySet := &jose.JsonWebKeySet{
-		Keys: []jose.JsonWebKey{
+	jsonWebKeySet := &jose.JSONWebKeySet{
+		Keys: []jose.JSONWebKey{
 			{
 				Key:       publicKey,
 				KeyID:     "0",

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 	"github.com/hashicorp/golang-lru"
-	"gopkg.in/square/go-jose.v1"
+	"gopkg.in/square/go-jose.v2"
 	traefiktls "github.com/containous/traefik/tls"
 	"github.com/dgrijalva/jwt-go"
 	"net/url"
@@ -117,7 +117,7 @@ func GetPublicKeyFromIssuerUri(kid string, issuerUri string) (interface{}, x509.
 	return GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, openIdConnectDiscoveryUri.String())
 }
 
-func DownloadJwksUri(jwksUri string)(*jose.JsonWebKeySet, error){
+func DownloadJwksUri(jwksUri string)(*jose.JSONWebKeySet, error){
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
@@ -133,7 +133,7 @@ func DownloadJwksUri(jwksUri string)(*jose.JsonWebKeySet, error){
 	}
 	defer resp.Body.Close()
 
-	jwks := &jose.JsonWebKeySet{}
+	jwks := &jose.JSONWebKeySet{}
 	err = json.Unmarshal(body, jwks)
 	if err != nil {
 		return nil, err
@@ -227,7 +227,7 @@ func GetPrivateKeyFromPem(privateKeyPemData []byte) (interface{}, error){
 	}
 }
 
-func GetPublicKeyFromJwks(jwks *jose.JsonWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
+func GetPublicKeyFromJwks(jwks *jose.JSONWebKeySet, kid string) (interface{}, x509.SignatureAlgorithm, error) {
 	for _, key := range jwks.Keys {
 		if key.KeyID == kid {
 			if !key.Valid() {

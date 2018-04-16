@@ -5,10 +5,10 @@ import (
 )
 
 const (
-	annotationKubernetesIngressClass                = "kubernetes.io/ingress.class"
-	annotationKubernetesAuthRealm                   = "ingress.kubernetes.io/auth-realm"
-	annotationKubernetesAuthType                    = "ingress.kubernetes.io/auth-type"
-	annotationKubernetesAuthSecret                  = "ingress.kubernetes.io/auth-secret"
+	annotationKubernetesIngressClass               = "kubernetes.io/ingress.class"
+	annotationKubernetesAuthRealm                  = "ingress.kubernetes.io/auth-realm"
+	annotationKubernetesAuthType                   = "ingress.kubernetes.io/auth-type"
+	annotationKubernetesAuthSecret                 = "ingress.kubernetes.io/auth-secret"
 	annotationKubernetesAuthHeaderField            = "ingress.kubernetes.io/auth-header-field"
 	annotationKubernetesAuthForwardResponseHeaders = "ingress.kubernetes.io/auth-response-headers"
 	annotationKubernetesAuthRemoveHeader           = "ingress.kubernetes.io/auth-remove-header"

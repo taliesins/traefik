@@ -902,6 +902,7 @@ var _templatesKubernetesTmpl = []byte(`[backends]
 
     {{end}}
 
+
     {{if $frontend.WhiteList }}
     [frontends."{{ $frontendName }}".whiteList]
       sourceRange = [{{range $frontend.WhiteList.SourceRange }}
