@@ -792,8 +792,107 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 
 	assert.NoError(t, err, "there should be no error")
 	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
+
+	cookies := res.Cookies()
+	assert.Len(t, cookies, 1, "At least one cookie should have been returned" )
+
+	if len(cookies) == 1 {
+		assert.EqualValues(t, sessionCookieName, cookies[0].Name, "Session cookie for id_token not present")
+		assert.True(t, cookies[0].Expires.Equal(time.Time{}), "Session cookie should not have this set")
+		assert.True(t, cookies[0].MaxAge == 0, "Session cookie should not have this set")
+	}
+
 	body, err := ioutil.ReadAll(res.Body)
 	assert.EqualValues(t, fmt.Sprintf("<a href=\"%s\">See Other</a>.\n\n", clientRequestUrl), string(body), "Should be equal")
+}
+
+func TestRedirectorWithInvalidCookieAndValidHashSuccess(t *testing.T) {
+	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+
+	jwtConfiguration := &types.Jwt{}
+	jwtConfiguration.Issuer = jwksServer.URL
+	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
+	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+	ts, err := getMiddlewareServer(jwtConfiguration)
+	if err != nil {
+		panic(err)
+	}
+	defer ts.Close()
+
+	client := getClient()
+
+	clientRequestUrl, err := url.Parse(ts.URL)
+	if err != nil {
+		panic(err)
+	}
+
+	if clientRequestUrl.Path == ""{
+		clientRequestUrl.Path = "/"
+	}
+
+	clientRequestUrl.Scheme = "https"
+
+	nonce := uuid.Get()
+	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+	//Work out the url that the SSO would redirect back to
+	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
+	if err != nil {
+		panic(err)
+	}
+
+	//Need the signing key to use for mac of url, so just use the one we use for JWT
+	privateKeyPemData, err := certificate.KeyFile.Read()
+	if err != nil {
+		panic(err)
+	}
+
+	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
+	if err != nil {
+		panic(err)
+	}
+
+	addMacHashToUrl(expectedRedirectorUrl, privateKey)
+
+	claims := &jwt.StandardClaims{}
+	claims.Issuer = jwksServer.URL
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	token.Header["kid"] = "0"
+
+	signedToken, err := token.SignedString(privateKey)
+	if err != nil {
+		panic(err)
+	}
+
+	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
+
+	cookie := &http.Cookie{
+		Name:  sessionCookieName,
+		Value: signedToken + "dodgy_token",
+	}
+	req.AddCookie(cookie)
+
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.EqualValues(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	cookies := res.Cookies()
+	assert.Len(t, cookies, 1, "At least one cookie should have been returned" )
+
+	if len(cookies) == 1 {
+		assert.EqualValues(t, sessionCookieName, cookies[0].Name, "Session cookie for id_token not present")
+		assert.True(t, cookies[0].Expires.Before(time.Now().UTC()), "Session cookie should be expired")
+		assert.True(t, cookies[0].MaxAge < 0, "Session cookie should be expired")
+	}
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.EqualValues(t, "\n", string(body), "Should be equal")
 }
 
 func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t *testing.T) {
@@ -872,11 +971,19 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 
 	assert.NoError(t, err, "there should be no error")
 	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
+
+	cookies := res.Cookies()
+	assert.Len(t, cookies, 1, "At least one cookie should have been returned" )
+
+	if len(cookies) == 1 {
+		assert.EqualValues(t, sessionCookieName, cookies[0].Name, "Session cookie for id_token not present")
+		assert.True(t, cookies[0].Expires.Equal(time.Time{}), "Session cookie should not have this set")
+		assert.True(t, cookies[0].MaxAge == 0, "Session cookie should not have this set")
+	}
+
 	body, err := ioutil.ReadAll(res.Body)
 	assert.EqualValues(t, fmt.Sprintf("<a href=\"%s\">See Other</a>.\n\n", clientRequestUrl), string(body), "Should be equal")
 }
-
-
 
 func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
 	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
@@ -948,6 +1055,16 @@ func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
 
 	assert.NoError(t, err, "there should be no error")
 	assert.EqualValues(t, http.StatusSeeOther, res.StatusCode, "they should be equal")
+
+	cookies := res.Cookies()
+	assert.Len(t, cookies, 1, "At least one cookie should have been returned" )
+
+	if len(cookies) == 1 {
+		assert.EqualValues(t, sessionCookieName, cookies[0].Name, "Session cookie for id_token not present")
+		assert.True(t, cookies[0].Expires.Equal(time.Time{}), "Session cookie should not have this set")
+		assert.True(t, cookies[0].MaxAge == 0, "Session cookie should not have this set")
+	}
+
 	body, err := ioutil.ReadAll(res.Body)
 	assert.EqualValues(t, "", string(body), "Should be equal")
 }

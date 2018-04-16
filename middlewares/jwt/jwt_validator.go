@@ -47,6 +47,27 @@ func NewJwtValidator(config *types.Jwt, tracingMiddleware *tracing.Tracing) (*Jw
 	return &jwtValidator, nil
 }
 
+func getCookie(requestUrl *url.URL, value string)(*http.Cookie){
+	sessionCookie := http.Cookie{
+		Name:sessionCookieName,
+		Value: value,
+		HttpOnly: true,
+		Secure: true,
+		Domain: requestUrl.Hostname(),
+		Path: "/",
+	}
+
+	return &sessionCookie
+}
+
+func getExpiredSessionCookie(requestUrl *url.URL) (*http.Cookie){
+	sessionCookie := getCookie(requestUrl, "")
+	sessionCookie.MaxAge = -1
+	sessionCookie.Expires = time.Now().Add(-100 * time.Hour)
+
+	return sessionCookie
+}
+
 func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	var err error
 
@@ -110,6 +131,10 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			}
 
 			if strings.HasPrefix(r.URL.Path, redirectorPath) {
+				//Drop any pre-existing cookie as it should be dead now
+				sessionCookie := getExpiredSessionCookie(r.URL)
+				http.SetCookie(w, sessionCookie)
+
 				//Prevent endless loop if callback address, no one should be calling this directly without an id_token set
 				http.Error(w, "", http.StatusUnauthorized)
 				return
@@ -351,22 +376,18 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 			if err == nil && redirectUrl != nil && token != "" {
 				log.Infof("provided id_token passed validation, redirecting to: %s", redirectUrl.String())
 
-				sessionCookie := http.Cookie{
-					Name:sessionCookieName,
-					Value: token,
-					HttpOnly: true,
-					Secure: true,
-					Domain: r.URL.Hostname(),
-					Path: "/",
-				}
-
-				http.SetCookie(w, &sessionCookie)
+				sessionCookie := getCookie(r.URL, token)
+				http.SetCookie(w, sessionCookie)
 				http.Redirect(w, r, redirectUrl.String(), http.StatusSeeOther)
 				return
 			}
 
 			//More then likely there is something wrong with the validation rules of the issues id_token (issuer could be incorrectly configured)
 			log.Infof("provided id_token failed validation: %s", err)
+
+			//Drop any pre-existing cookie as it should be dead now
+			sessionCookie := getExpiredSessionCookie(r.URL)
+			http.SetCookie(w, sessionCookie)
 			http.Error(w, "", http.StatusUnauthorized)
 			return
 		}
