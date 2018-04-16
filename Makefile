@@ -42,44 +42,44 @@ print-%: ; @echo $*=$($*)
 default: binary
 
 all: generate-webui build ## validate all checks, build linux binary, run all tests\ncross non-linux binaries
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh
 
 binary: generate-webui build ## build the linux binary
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh generate binary"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh generate binary
 
 crossbinary: generate-webui build ## cross build the non-linux binaries
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh generate crossbinary"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh generate crossbinary
 
 crossbinary-parallel:
 	$(MAKE) generate-webui
 	$(MAKE) build crossbinary-default crossbinary-others
 
 crossbinary-default: generate-webui build
-	$(DOCKER_RUN_TRAEFIK_NOTTY) /bin/bash -c "./script/make.sh generate crossbinary-default"
+	$(DOCKER_RUN_TRAEFIK_NOTTY) ./script/make.sh generate crossbinary-default
 
 crossbinary-default-parallel:
 	$(MAKE) generate-webui
 	$(MAKE) build crossbinary-default
 
 crossbinary-others: generate-webui build
-	$(DOCKER_RUN_TRAEFIK_NOTTY) /bin/bash -c "./script/make.sh generate crossbinary-others"
+	$(DOCKER_RUN_TRAEFIK_NOTTY) ./script/make.sh generate crossbinary-others
 
 crossbinary-others-parallel:
 	$(MAKE) generate-webui
 	$(MAKE) build crossbinary-others
 
 test: build ## run the unit and integration tests
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh generate test-unit binary test-integration"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh generate test-unit binary test-integration
 
 test-unit: build ## run the unit tests
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh generate test-unit"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh generate test-unit
 
 test-integration: build ## run the integration tests
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh generate binary test-integration"
-	TEST_HOST=1 /bin/bash -c "./script/make.sh test-integration"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh generate binary test-integration
+	TEST_HOST=1 ./script/make.sh test-integration
 
 validate: build  ## validate code, vendor and autogen
-	$(DOCKER_RUN_TRAEFIK) /bin/bash -c "./script/make.sh validate-gofmt validate-govet validate-golint validate-misspell validate-vendor validate-autogen"
+	$(DOCKER_RUN_TRAEFIK) ./script/make.sh validate-gofmt validate-govet validate-golint validate-misspell validate-vendor validate-autogen
 
 build: dist
 	$(DOCKER_CMD) build $(PROXY_BUILD_ARGS) $(DOCKER_BUILD_ARGS) -t "$(TRAEFIK_DEV_IMAGE)" -f build.Dockerfile .
@@ -132,7 +132,7 @@ run-dev:
 
 generate-webui: build-webui
 	if [ ! -d "$(CURDIR)/static" ]; then mkdir -p "$(CURDIR)/static";fi
-	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui /bin/bash npm run build 
+	$(DOCKER_CMD) run --rm -v "$(CURDIR)/static:/src/static:z" traefik-webui npm run build 
 	echo 'For more informations show `webui/readme.md`' > $(CURDIR)/static/DONT-EDIT-FILES-IN-THIS-DIRECTORY.md 
 
 lint:
@@ -146,10 +146,10 @@ pull-images:
 
 dep-ensure:
 	dep ensure -v
-	/bin/bash -c "./script/prune-dep.sh"
+	./script/prune-dep.sh
 
 dep-prune:
-	/bin/bash -c "./script/prune-dep.sh"
+	./script/prune-dep.sh
 
 help: ## this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {sub("\\\\n",sprintf("\n%22c"," "), $$2);printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
