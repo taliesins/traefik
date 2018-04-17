@@ -223,6 +223,9 @@ type Jwt struct {
 	SsoAddressTemplate string `json:"ssoAddressTemplate,omitempty"`
 	UrlMacClientSecret string `json:"urlMacClientSecret,omitempty"`
 	UrlMacPrivateKey   string `json:"urlMacPrivateKey,omitempty"`
+	AlgorithmValidationRegex string `json:"algorithmValidationRegex,omitempty"`
+	AudienceValidationRegex string `json:"audienceValidationRegex,omitempty"`
+	IssuerValidationRegex string `json:"issuerValidationRegex,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.
