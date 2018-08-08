@@ -8,6 +8,7 @@ import (
 	"github.com/containous/traefik/middlewares"
 	"github.com/containous/traefik/middlewares/accesslog"
 	mauth "github.com/containous/traefik/middlewares/auth"
+	mjwt "github.com/containous/traefik/middlewares/jwt"
 	"github.com/containous/traefik/middlewares/errorpages"
 	"github.com/containous/traefik/middlewares/redirect"
 	"github.com/containous/traefik/types"
@@ -100,6 +101,21 @@ func (s *Server) buildMiddlewares(frontendName string, frontend *types.Frontend,
 		}
 
 		handler := s.wrapNegroniHandlerWithAccessLog(authMiddleware, fmt.Sprintf("Auth for %s", frontendName))
+		middle = append(middle, handler)
+	}
+
+	///JwtToken
+	if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.DiscoveryAddress != "" || frontend.Jwt.ClientSecret != "") {
+		jwtValidatorMiddleware, err := mjwt.NewJwtValidator(frontend.Jwt, s.tracingMiddleware)
+
+		if err != nil {
+			log.Errorf("Error creating Jwt Validator: %s", err)
+			return nil, nil, nil, err
+		}
+
+		log.Info(fmt.Sprintf(" Adding jwt middleware for: %s   Issuer: %s   Audience: %s   ClientSecret: %t   PublicKey: %t   DiscoveryAddress: %s   JwksAddress: %s   SsoAddressTemplate: %s", frontendName, frontend.Jwt.Issuer, frontend.Jwt.Audience, frontend.Jwt.ClientSecret != "", frontend.Jwt.PublicKey != "", frontend.Jwt.DiscoveryAddress, frontend.Jwt.JwksAddress, frontend.Jwt.SsoAddressTemplate))
+
+		handler := s.wrapNegroniHandlerWithAccessLog(jwtValidatorMiddleware.Handler, fmt.Sprintf("Auth for %s", frontendName))
 		middle = append(middle, handler)
 	}
 
