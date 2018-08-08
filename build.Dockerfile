@@ -1,4 +1,4 @@
-FROM golang:1.10.1-alpine
+FROM golang:1.10.3-alpine
 
 # Which docker version to test on
 ARG DOCKER_VERSION=17.03.2
