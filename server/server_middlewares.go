@@ -104,7 +104,7 @@ func (s *Server) buildMiddlewares(frontendName string, frontend *types.Frontend,
 		middle = append(middle, handler)
 	}
 
-	///JwtToken
+	// JwtToken
 	if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.DiscoveryAddress != "" || frontend.Jwt.ClientSecret != "") {
 		jwtValidatorMiddleware, err := mjwt.NewJwtValidator(frontend.Jwt, s.tracingMiddleware)
 

@@ -265,7 +265,6 @@ func (p *Provider) loadIngresses(k8sClient Client) (*types.Configuration, error)
 						PassTLSCert:          passTLSCert,
 						Routes:               make(map[string]types.Route),
 						Priority:             priority,
-						BasicAuth:            basicAuthCreds,
 						Jwt:                  jwt,
 						WhiteList:      getWhiteList(i),
 						Redirect:       getFrontendRedirect(i, baseName, pa.Path),
