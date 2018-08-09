@@ -99,14 +99,12 @@ image-dirty: binary ## build a docker traefik image
 image: clear-static binary ## clean up static directory and build a docker traefik image
 	$(DOCKER_CMD) build $(PROXY_BUILD_ARGS) -t $(TRAEFIK_IMAGE) .
 
-docs-image:
-	docker build -t $(TRAEFIK_DOC_IMAGE) -f docs.Dockerfile .
-
 docs: docs-image
 	$(DOCKER_CMD) run  $(DOCKER_RUN_DOC_OPTS) $(TRAEFIK_DOC_IMAGE) mkdocs serve
 
 docs-image:
 	$(DOCKER_CMD) build $(PROXY_BUILD_ARGS) -t $(TRAEFIK_DOC_IMAGE) -f docs.Dockerfile .
+
 docs-build: site
 
 docs-verify: site
