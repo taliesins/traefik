@@ -16,6 +16,7 @@ import (
 	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"runtime"
 )
 
 func TestLoadIngresses(t *testing.T) {
@@ -3611,7 +3612,12 @@ func TestProviderNewK8sInClusterClient(t *testing.T) {
 	os.Setenv("KUBERNETES_SERVICE_PORT", "443")
 	defer os.Clearenv()
 	_, err := p.newK8sClient("")
-	assert.EqualError(t, err, "failed to create in-cluster configuration: open /var/run/secrets/kubernetes.io/serviceaccount/token: no such file or directory")
+
+	if runtime.GOOS == "windows" {
+		assert.EqualError(t, err, "failed to create in-cluster configuration: open /var/run/secrets/kubernetes.io/serviceaccount/token: The system cannot find the path specified.")
+	} else {
+		assert.EqualError(t, err, "failed to create in-cluster configuration: open /var/run/secrets/kubernetes.io/serviceaccount/token: no such file or directory")
+	}
 }
 
 func TestProviderNewK8sInClusterClientFailLabelSel(t *testing.T) {
