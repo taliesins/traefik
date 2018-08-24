@@ -248,7 +248,7 @@ func (p *Provider) loadIngresses(k8sClient Client) (*types.Configuration, error)
 						continue
 					}
 
-					jwt, err := handleJwtConfig(i, k8sClient)
+					jwt, err := getJwtConfig(i, k8sClient)
 					if err != nil {
 						log.Errorf("Failed to retrieve jwt configuration for ingress %s/%s: %s", i.Namespace, i.Name, err)
 						continue
@@ -599,7 +599,7 @@ func parseRequestModifier(requestModifier, ruleType string) (string, error) {
 	return modifier + ":" + value, nil
 }
 
-func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, error) {
+func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, error) {
 	publicKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtPublicKey, "")
 	clientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthJwtClientSecret, "")
 	issuer := getStringValue(i.Annotations, annotationKubernetesAuthOidcIssuer, "")
@@ -612,7 +612,6 @@ func handleJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt
 	issuerValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcIssuerValidationRegex, "")
 	audienceValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAudienceValidationRegex, "")
 	algorithmValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAlgorithmValidationRegex, "")
-
 
 	jwt := types.Jwt{
 		PublicKey:          publicKey,
