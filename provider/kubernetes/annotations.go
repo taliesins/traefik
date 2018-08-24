@@ -28,6 +28,7 @@ const (
 	annotationKubernetesAuthOidcAlgorithmValidationRegex = "ingress.kubernetes.io/auth-oidc-algorithm-validation-regex"
 	annotationKubernetesAuthOidcAudienceValidationRegex  = "ingress.kubernetes.io/auth-oidc-audience-validation-regex"
 	annotationKubernetesAuthOidcIssuerValidationRegex    = "ingress.kubernetes.io/auth-oidc-issuer-validation-regex"
+	annotationKubernetesAuthOidcIgnorePathRegex    		 = "ingress.kubernetes.io/auth-oidc-ignore-path-regex"
 	annotationKubernetesRewriteTarget              = "ingress.kubernetes.io/rewrite-target"
 	annotationKubernetesWhiteListSourceRange       = "ingress.kubernetes.io/whitelist-source-range"
 	annotationKubernetesWhiteListUseXForwardedFor  = "ingress.kubernetes.io/whitelist-x-forwarded-for"

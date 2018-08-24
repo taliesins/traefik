@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"crypto/ecdsa"
-	"crypto/rsa"
 	"encoding/json"
 	"github.com/containous/traefik/middlewares/tracing"
 	"github.com/containous/traefik/testhelpers"
@@ -17,10 +15,8 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/negroni"
-	"gopkg.in/square/go-jose.v2"
 	"os"
 	"path"
-	"reflect"
 	"runtime"
 	"net/url"
 	"regexp"
@@ -29,6 +25,10 @@ import (
 	"strconv"
 	"github.com/containous/traefik/server/uuid"
 	"crypto/tls"
+	"reflect"
+	"gopkg.in/square/go-jose.v2"
+	"crypto/rsa"
+	"crypto/ecdsa"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -88,84 +88,7 @@ func getCertificateFromPath(publicKeyRootPath string, privateKeyRootPath string)
 	return certificate, nil
 }
 
-func getCertificateFromPathAndJwksServer(publicKeyRootPath string, privateKeyRootPath string)(certificate *traefiktls.Certificate, server *httptest.Server, oidcDiscoveryUri *url.URL, jwksUri *url.URL, err error){
-	certificate, err = getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	jsonWebKeySet, err := getJsonWebset(certificate)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
-
-	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
-	jwksServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.RequestURI == oidcDiscoveryUriPath {
-			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
-			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
-		} else if r.RequestURI == jwksUriPath {
-			w.Write(jsonWebKeySetJson)
-		} else {
-			panic("Don't know how to handle request")
-		}
-	}))
-
-	oidcDiscoveryUri, err = url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath))
-	jwksUri, err = url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath))
-
-	return certificate, jwksServer, oidcDiscoveryUri, jwksUri, nil
-}
-
-func getMiddlewareServer(jwtConfiguration *types.Jwt)(server *httptest.Server, err error){
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
-	if err != nil {
-		return nil, err
-	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
-	})
-
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	middlewareServer := httptest.NewTLSServer(n)
-
-	return middlewareServer, nil
-}
-
-func getClient()(*http.Client){
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	return client
-}
-
-func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod) error {
-	signingKey := []byte(clientSecret)
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	signedToken, err := token.SignedString(signingKey)
-	if err != nil {
-		return err
-	}
-
+func addTokenToRequest(req *http.Request, tokenMethod TokenMethod, signedToken string){
 	switch tokenMethod {
 	case TokenMethodAuthorizationHeader:
 		{
@@ -182,222 +105,10 @@ func signHeaderWithClientSecret(req *http.Request, clientSecret string, claims *
 			cookie := &http.Cookie{
 				Name:  sessionCookieName,
 				Value: signedToken,
-				//Path:"", //TODO: should we be validating the path?
-				//Domain:"", //TODO: should we be validating the domain
 			}
 			req.AddCookie(cookie)
 		}
 	}
-
-	return nil
-}
-
-func runMiddleWareWithClientSecretSigning(handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, clientSecret string, claims *jwt.StandardClaims, tokenMethod TokenMethod, skipSigning bool, path string) (*http.Response, error) {
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
-	if err != nil {
-		return nil, err
-	}
-
-	handler := http.HandlerFunc(handlerFunc)
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewServer(n)
-	defer ts.Close()
-
-	client := getClient()
-
-	requestPath, err := url.Parse(path)
-	base, err := url.Parse(ts.URL)
-	requestUrl := base.ResolveReference(requestPath).String()
-
-	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl, nil)
-
-	if !skipSigning {
-		err = signHeaderWithClientSecret(req, clientSecret, claims, tokenMethod)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return client.Do(req)
-}
-
-func runTestWithClientSecretSuccess(t *testing.T, clientSecret string, tokenMethod TokenMethod) {
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
-
-	claims := &jwt.StandardClaims{}
-	jwtConfiguration := &types.Jwt{
-		ClientSecret: clientSecret,
-	}
-
-	res, err := runMiddleWareWithClientSecretSigning(handlerFunc, jwtConfiguration, clientSecret, claims, tokenMethod, false, "/")
-
-	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
-
-	body, err := ioutil.ReadAll(res.Body)
-	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, "traefik\n", string(body), "they should be equal")
-}
-
-func runTestWithClientSecretFailure(t *testing.T, serverClientSecret string, clientClientSecret string, tokenMethod TokenMethod) {
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
-
-	claims := &jwt.StandardClaims{}
-	jwtConfiguration := &types.Jwt{
-		ClientSecret: serverClientSecret,
-	}
-
-	res, err := runMiddleWareWithClientSecretSigning(handlerFunc, jwtConfiguration, clientClientSecret, claims, tokenMethod, false, "/")
-
-	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
-
-	body, err := ioutil.ReadAll(res.Body)
-	assert.NoError(t, err, "there should be no error")
-	assert.NotEqual(t, "traefik\n", string(body), "they should not be equal")
-}
-
-func signHeaderWithCertificate(req *http.Request, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod) error {
-	privateKeyPemData, err := certificate.KeyFile.Read()
-	if err != nil {
-		return err
-	}
-
-	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
-	if err != nil {
-		return err
-	}
-
-	token := jwt.NewWithClaims(signingMethod, claims)
-	if kid != "" {
-		token.Header["kid"] = kid
-	}
-
-	signedToken, err := token.SignedString(privateKey)
-	if err != nil {
-		return err
-	}
-
-	switch tokenMethod {
-	case TokenMethodAuthorizationHeader:
-		{
-			req.Header.Set(defaultAuthorizationHeaderName, fmt.Sprintf("bearer %v", signedToken))
-		}
-	case TokenMethodQuerystring:
-		{
-			q := req.URL.Query()
-			q.Add(idTokenQuerystringParameterName, signedToken)
-			req.URL.RawQuery = q.Encode()
-		}
-	case TokenMethodCookie:
-		{
-			cookie := &http.Cookie{
-				Name:  sessionCookieName,
-				Value: signedToken,
-				//Path:"", //TODO: should we be validating the path?
-				//Domain:"", //TODO: should we be validating the domain
-			}
-			req.AddCookie(cookie)
-		}
-	}
-
-	return nil
-}
-
-func runMiddleWareWithCertificateSigning(handlerFunc func(http.ResponseWriter, *http.Request), jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, signingMethod jwt.SigningMethod, kid string, claims *jwt.StandardClaims, tokenMethod TokenMethod, skipSigning bool, path string) (*http.Response, error) {
-	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
-	if err != nil {
-		return nil, err
-	}
-
-	handler := http.HandlerFunc(handlerFunc)
-	n := negroni.New(jwtMiddleware.Handler)
-	n.UseHandler(handler)
-	ts := httptest.NewServer(n)
-	defer ts.Close()
-
-	client := getClient()
-
-	requestPath, err := url.Parse(path)
-	base, err := url.Parse(ts.URL)
-	requestUrl := base.ResolveReference(requestPath).String()
-
-	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl, nil)
-	if !skipSigning {
-		err = signHeaderWithCertificate(req, certificate, signingMethod, kid, claims, tokenMethod)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return client.Do(req)
-}
-
-func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod) {
-	certificate, err := getCertificateFromPath(certificatePath, certificatePath)
-	if err != nil {
-		panic(err)
-	}
-
-	certContent, err := certificate.CertFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	kid := ""
-	claims := &jwt.StandardClaims{}
-	jwtConfiguration := &types.Jwt{
-		PublicKey: string(certContent),
-	}
-
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
-
-	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
-
-	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
-
-	body, err := ioutil.ReadAll(res.Body)
-	assert.NoError(t, err, "there should be no error")
-	assert.EqualValues(t, "traefik\n", string(body), "they should be equal")
-}
-
-func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, publicKeyRootPath string, privateKeyRootPath string, tokenMethod TokenMethod) {
-	certificate, err := getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
-	if err != nil {
-		panic(err)
-	}
-
-	certContent, err := certificate.CertFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	kid := ""
-	claims := &jwt.StandardClaims{}
-	jwtConfiguration := &types.Jwt{
-		PublicKey: string(certContent),
-	}
-
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
-
-	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
-
-	assert.NoError(t, err, "there should be no error")
-	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
-
-	body, err := ioutil.ReadAll(res.Body)
-	assert.NoError(t, err, "there should be no error")
-	assert.NotEqual(t, "traefik\n", string(body), "they should not be equal")
 }
 
 func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JSONWebKeySet, error) {
@@ -435,41 +146,382 @@ func getJsonWebset(certificate *traefiktls.Certificate) (*jose.JSONWebKeySet, er
 	return jsonWebKeySet, nil
 }
 
-func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
-	certificate, jwksServer, oidcDiscoveryUri, jwksUri, err := getCertificateFromPathAndJwksServer(certificatePath, certificatePath)
+func getMiddlewareServer(jwtConfiguration *types.Jwt)(server *httptest.Server, err error){
+	jwtMiddleware, err := NewJwtValidator(jwtConfiguration, &tracing.Tracing{})
+	if err != nil {
+		return nil, err
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, fmt.Sprintf(`{"RequestUri":"%s", "Referer":"%s"}`, r.URL.String(), r.Referer() ))
+	})
+
+	n := negroni.New(jwtMiddleware.Handler)
+	n.UseHandler(handler)
+	middlewareServer := httptest.NewTLSServer(n)
+
+	return middlewareServer, nil
+}
+
+type overrideJwtConfiguration func(jwtConfig *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt)
+
+func buildTestServers(publicKeyRootPath string, privateKeyRootPath string, overrideJwtConfiguration overrideJwtConfiguration) (certificate *traefiktls.Certificate, jwksServer *httptest.Server, middlwareServer *httptest.Server, err error) {
+	if publicKeyRootPath == "" {
+		publicKeyRootPath = "signing/rsa"
+	}
+
+	if privateKeyRootPath == "" {
+		privateKeyRootPath = "signing/rsa"
+	}
+
+	certificate, err = getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	jsonWebKeySet, err := getJsonWebset(certificate)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
+	jwksServer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.RequestURI == oidcDiscoveryUriPath {
+			jwksUri := fmt.Sprintf("https://%s%s", r.Host, jwksUriPath)
+			fmt.Fprintln(w, fmt.Sprintf(`{"jwks_uri":"%s"}`, jwksUri))
+		} else if r.RequestURI == jwksUriPath {
+			w.Write(jsonWebKeySetJson)
+		} else {
+			panic("Don't know how to handle request")
+		}
+	}))
+
+	ssoAddressTemplate := "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
+	issuerUri, err := url.Parse(jwksServer.URL)
+	if err != nil {
+		jwksServer.Close()
+		return nil, nil, nil, err
+	}
+
+	oidcDiscoveryUri, err := url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, oidcDiscoveryUriPath))
+	if err != nil {
+		jwksServer.Close()
+		return nil, nil, nil, err
+	}
+
+	jwksUri, err := url.Parse(fmt.Sprintf("%s%s", jwksServer.URL, jwksUriPath))
+	if err != nil {
+		jwksServer.Close()
+		return nil, nil, nil, err
+	}
+
+	jwtConfiguration := &types.Jwt{}
+	if overrideJwtConfiguration != nil {
+		overrideJwtConfiguration(jwtConfiguration, certificate, ssoAddressTemplate, issuerUri, oidcDiscoveryUri, jwksUri)
+	} else {
+		jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+	}
+
+	middlewareServer, err := getMiddlewareServer(jwtConfiguration)
+	if err != nil {
+		jwksServer.Close()
+		return nil, nil, nil, err
+	}
+
+	return certificate, jwksServer, middlewareServer, nil
+}
+
+type overrideClient func(*http.Client) (*http.Client)
+
+type overrideClaims func(claims *jwt.StandardClaims, certificate *traefiktls.Certificate, jwksServer *httptest.Server, middlwareServer *httptest.Server) (*jwt.StandardClaims)
+
+type overrideToken func(*jwt.Token)
+
+func buildTestClient(certificate *traefiktls.Certificate, clientSecret string, jwksServer *httptest.Server, middlwareServer *httptest.Server, tokenSigningMethod jwt.SigningMethod, requestPath string, overrideClient overrideClient, overrideClaims overrideClaims, overrideToken overrideToken) (client *http.Client, nonce string, issuedAt string, signedToken string, clientRequestUrl *url.URL, expectedRedirectorUrl *url.URL, err error) {
+	client = &http.Client{}
+	if overrideClient != nil {
+		overrideClient(client)
+	} else {
+		client.Transport= &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client.CheckRedirect= func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+
+	if requestPath == "" {
+		requestPath = "/"
+	}
+	clientRequestPath, err := url.Parse(requestPath)
+	base, err := url.Parse(middlwareServer.URL)
+	clientRequestUrl = base.ResolveReference(clientRequestPath)
+
+	if err != nil {
+		return nil, "", "", "", nil, nil, err
+	}
+
+	nonce = uuid.Get()
+	issuedAt = strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+	//Work out the url that the SSO would redirect back to
+	expectedRedirectorUrl, err = url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
+	if err != nil {
+		return nil, "", "", "", nil, nil, err
+	}
+
+	var privateKey interface{}
+	if clientSecret != ""  {
+		if tokenSigningMethod != jwt.SigningMethodHS256 && tokenSigningMethod != jwt.SigningMethodHS384 && tokenSigningMethod != jwt.SigningMethodHS512 {
+			return nil, "", "", "", nil, nil, fmt.Errorf("certificate needs to be specified with this signing method")
+		}
+
+		privateKey = []byte(clientSecret)
+	} else if certificate != nil {
+		if tokenSigningMethod == jwt.SigningMethodHS256 || tokenSigningMethod == jwt.SigningMethodHS384 || tokenSigningMethod == jwt.SigningMethodHS512 {
+			return nil, "", "", "", nil, nil, fmt.Errorf("client secret needs to be specified with this signing method")
+		}
+
+		//Need the signing key to use for mac of url, so just use the one we use for JWT
+		privateKeyPemData, err := certificate.KeyFile.Read()
+		if err != nil {
+			return nil, "", "", "", nil, nil, err
+		}
+
+		privateKey, err = GetPrivateKeyFromPem(privateKeyPemData)
+		if err != nil {
+			return nil, "", "", "", nil, nil, err
+		}
+	} else {
+		return nil, "", "", "", nil, nil, fmt.Errorf("certificate and client secret not specified, there is no way to sign request")
+	}
+
+	addMacHashToUrl(expectedRedirectorUrl, privateKey)
+
+	claims := &jwt.StandardClaims{}
+	if overrideClaims != nil {
+		overrideClaims(claims, certificate, jwksServer, middlwareServer)
+	} else {
+		claims.Issuer = jwksServer.URL
+	}
+
+	token := jwt.NewWithClaims(tokenSigningMethod, claims)
+	if overrideToken != nil {
+		overrideToken(token)
+	} else {
+		token.Header["kid"] = "0"
+	}
+
+	signedToken, err = token.SignedString(privateKey)
+	if err != nil {
+		return nil, "", "", "", nil,nil, err
+	}
+
+	return client, nonce, issuedAt, signedToken, clientRequestUrl, expectedRedirectorUrl, nil
+}
+
+func runTestWithClientSecretSuccess(t *testing.T, clientSecret string, tokenMethod TokenMethod) {
+	_, jwksServer, middlwareServer, err := buildTestServers("", "", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.ClientSecret=clientSecret
+		return jwtConfiguration
+	})
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
-	}
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(nil, clientSecret, jwksServer, middlwareServer, jwt.SigningMethodHS256, "", nil, nil, func(token *jwt.Token) {})
 
-	kid := "0"
-	claims := &jwt.StandardClaims{
-		Issuer: jwksServer.URL,
-	}
-	jwtConfiguration := &types.Jwt{}
-	if setIssuer {
-		jwtConfiguration.Issuer = jwksServer.URL
-	}
-	if setOidcDiscoveryUri {
-		jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
-	}
-	if setJwksUri {
-		jwtConfiguration.JwksAddress = jwksUri.String()
-	}
-
-	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, signingMethod, kid, claims, tokenMethod, false, "/")
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
 
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
-	assert.EqualValues(t, "traefik\n", string(body), "they should be equal")
+	assert.Regexp(t, `{"RequestUri":"\/.*", "Referer":""}\n`, string(body), "they should be equal")
 }
+
+func runTestWithClientSecretFailure(t *testing.T, serverClientSecret string, clientClientSecret string, tokenMethod TokenMethod) {
+	_, jwksServer, middlwareServer, err := buildTestServers("", "", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.ClientSecret=serverClientSecret
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(nil, clientClientSecret, jwksServer, middlwareServer, jwt.SigningMethodHS256, "", nil, nil, func(token *jwt.Token) {})
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.NotEqual(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should not be equal")
+}
+
+func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod) {
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		certContent, err := certificate.CertFile.Read()
+		if err != nil {
+			panic(err)
+		}
+
+		jwtConfiguration.PublicKey=string(certContent)
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Regexp(t, `{"RequestUri":"\/.*", "Referer":""}\n`, string(body), "they should be equal")
+}
+
+func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, publicKeyRootPath string, privateKeyRootPath string, tokenMethod TokenMethod) {
+	certificate, jwksServer, middlwareServer, err := buildTestServers(publicKeyRootPath, privateKeyRootPath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		certContent, err := certificate.CertFile.Read()
+		if err != nil {
+			panic(err)
+		}
+
+		jwtConfiguration.PublicKey=string(certContent)
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.NotEqual(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should not be equal")
+}
+
+func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		if setIssuer {
+			jwtConfiguration.Issuer = issuerUri.String()
+		}
+		if setOidcDiscoveryUri {
+			jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
+		}
+		if setJwksUri {
+			jwtConfiguration.JwksAddress = jwksUri.String()
+		}
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.EqualValues(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should be equal")
+}
+
+func runTestWithDiscoveryFailure(t *testing.T, signingMethod jwt.SigningMethod, serverCertificatePath string, clientCertificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
+	_, jwksServer, middlwareServer, err := buildTestServers(serverCertificatePath, serverCertificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		if setIssuer {
+			jwtConfiguration.Issuer = issuerUri.String()
+		}
+		if setOidcDiscoveryUri {
+			jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
+		}
+		if setJwksUri {
+			jwtConfiguration.JwksAddress = jwksUri.String()
+		}
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	clientCertificate, err := getCertificateFromPath(clientCertificatePath, clientCertificatePath)
+	if err != nil {
+		panic(err)
+	}
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(clientCertificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.NotEqual(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should not be equal")
+}
+
+/***************************/
 
 func TestWithClientSecretInAuthorizationHeaderSuccess(t *testing.T) {
 	runTestWithClientSecretSuccess(t, "mySecret", TokenMethodAuthorizationHeader)
@@ -495,6 +547,8 @@ func TestWithClientSecretInCookieWrongSecretFailure(t *testing.T) {
 	runTestWithClientSecretFailure(t, "mySecret", "mySecretWrong", TokenMethodCookie)
 }
 
+/***************************/
+
 func TestWithPublicKeyInAuthorizationHeaderSuccess(t *testing.T) {
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodES256, "signing/es256", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeySuccess(t, jwt.SigningMethodES384, "signing/es384", TokenMethodAuthorizationHeader)
@@ -508,9 +562,10 @@ func TestWithPublicKeyInAuthorizationHeaderSuccess(t *testing.T) {
 }
 
 func TestWithPublicKeyInAuthorizationHeaderFailure(t *testing.T) {
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodAuthorizationHeader)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodAuthorizationHeader)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodAuthorizationHeader)
+	//As long as the cert we are using is different
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "signing/es512", "signing/es256", TokenMethodAuthorizationHeader)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "signing/es256", "signing/es384", TokenMethodAuthorizationHeader)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "signing/es256", "signing/es512", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
@@ -532,15 +587,15 @@ func TestWithPublicKeyInQuerystringSuccess(t *testing.T) {
 }
 
 func TestWithPublicKeyInQuerystringFailure(t *testing.T) {
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "signing/another.es256", "signing/es256", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "signing/another.es384", "signing/es384", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "signing/another.es512", "signing/es512", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "signing/another.rsa", "signing/rsa", TokenMethodQuerystring)
 }
 
 func TestWithPublicKeyInCookieSuccess(t *testing.T) {
@@ -556,15 +611,15 @@ func TestWithPublicKeyInCookieSuccess(t *testing.T) {
 }
 
 func TestWithPublicKeyInCookieFailure(t *testing.T) {
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "../../integration/fixtures/https/snitest.com", "signing/es256", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "../../integration/fixtures/https/snitest.com", "signing/es384", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "../../integration/fixtures/https/snitest.com", "signing/es512", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
-	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES256, "signing/another.es256", "signing/es256", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES384, "signing/another.es384", "signing/es384", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodES512, "signing/another.es512", "signing/es512", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS256, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS384, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodPS512, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS384, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
+	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS512, "signing/another.rsa", "signing/rsa", TokenMethodCookie)
 }
 
 func TestWithSignedRsaPublicKeySuccess(t *testing.T) {
@@ -574,6 +629,33 @@ func TestWithSignedRsaPublicKeySuccess(t *testing.T) {
 func TestWithRsaPublicKeySignedWithWrongPrivateKeyFailure(t *testing.T) {
 	runTestWithPublicKeyFailure(t, jwt.SigningMethodRS256, "../../integration/fixtures/https/snitest.com", "signing/rsa", TokenMethodAuthorizationHeader)
 }
+
+/***************************/
+
+func TestWithOidcInAuthorizationHeaderSuccess(t *testing.T) {
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodES256, "signing/es256", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodES384, "signing/es384", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodES512, "signing/es512", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodPS256, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodPS384, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodPS512, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodRS256, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodRS384, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoverySuccess(t, jwt.SigningMethodRS512, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
+}
+
+func TestWithOidcInAuthorizationHeaderFailure(t *testing.T) {
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodES256, "signing/es256", "signing/another.es256", true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodES384, "signing/es384", "signing/another.es384",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodES512, "signing/es512", "signing/another.es512",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodPS256, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodPS384, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodPS512, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodRS256, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodRS384, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+	runTestWithDiscoveryFailure(t, jwt.SigningMethodRS512, "signing/rsa", "signing/another.rsa",true, false, false, TokenMethodAuthorizationHeader)
+}
+
 
 func TestWithRS256UsingJwksUriSuccess(t *testing.T) {
 	runTestWithDiscoverySuccess(t, jwt.SigningMethodRS256, "signing/rsa", true, false, false, TokenMethodAuthorizationHeader)
@@ -588,24 +670,25 @@ func TestWithRS256UsingIssuerUriSuccess(t *testing.T) {
 }
 
 func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		return jwtConfiguration
+	})
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
+	//client, nonce, issuedAt, signedToken, expectedRedirectorUrl, err
+	client, _, _, _, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
+	if err != nil {
+		panic(err)
 	}
 
-	kid := "0"
-	claims := &jwt.StandardClaims{
-		Issuer: jwksServer.URL,
-	}
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
 
-	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true, "/")
+	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
@@ -616,26 +699,31 @@ func TestWithNoAuthenticationAndNoSsoProvidedFailure(t *testing.T) {
 }
 
 func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	var expectedSsoAddressTemplate string
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		expectedSsoAddressTemplate = jwtConfiguration.SsoAddressTemplate
+
+		return jwtConfiguration
+	})
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	handlerFunc := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "traefik")
+	//client, nonce, issuedAt, signedToken, expectedRedirectorUrl, err
+	client, nonce, _, _, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
+	if err != nil {
+		panic(err)
 	}
 
-	kid := "0"
-	claims := &jwt.StandardClaims{
-		Issuer: jwksServer.URL,
-	}
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	res, err := runMiddleWareWithCertificateSigning(handlerFunc, jwtConfiguration, certificate, jwt.SigningMethodRS256, kid, claims, TokenMethodCookie, true, "/")
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
@@ -654,7 +742,7 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	assert.Len(t, expectedBodyMatches, 4, "Expect 4 matches")
 	bodyMatch := expectedBodyMatches[1]
 
-	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(templateToRegexFixer(jwtConfiguration.SsoAddressTemplate), "{{.CallbackUrl}}", "(.*)", -1), "{{.State}}", "(.*)", -1), "{{.Nonce}}", "(.*)", -1)
+	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(templateToRegexFixer(expectedSsoAddressTemplate), "{{.CallbackUrl}}", "(.*)", -1), "{{.State}}", "(.*)", -1), "{{.Nonce}}", "(.*)", -1)
 	expectedRedirectUrlRegex, err := regexp.Compile(redirectUrlRegex)
 	expectedRedirectUrlMatches := expectedRedirectUrlRegex.FindStringSubmatch(bodyMatch)
 	assert.Len(t, expectedRedirectUrlMatches, 4, "Expect 4 matches")
@@ -662,45 +750,36 @@ func TestWithNoAuthenticationAndSsoProvidedFailure(t *testing.T) {
 	redirectUriMatch := expectedRedirectUrlMatches[2]
 	stateMatch := expectedRedirectUrlMatches[3]
 
-	assert.NotEqual(t, url.QueryEscape(""), nonceMatch, "nonce should be specified")
+	assert.Equal(t, nonce, nonceMatch, "nonce should be specified")
 	assert.EqualValues(t, url.QueryEscape(expectedRedirectUri.String()), redirectUriMatch, "redirect_uri should be specified")
 	assert.NotEqual(t, url.QueryEscape(""), stateMatch, "state should be specified")
 }
 
+/***************************/
+
 func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		return jwtConfiguration
+	})
+
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	ts, err := getMiddlewareServer(jwtConfiguration)
+	//client, nonce, issuedAt, signedToken, expectedRedirectorUrl, err
+	client, _, _, _, clientRequestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}
-	defer ts.Close()
-
-	client := getClient()
-
-	clientRequestUrl, err := url.Parse(ts.URL)
-	if err != nil {
-		panic(err)
-	}
-
-	if clientRequestUrl.Path == ""{
-		clientRequestUrl.Path = "/"
-	}
-
-	clientRequestUrl.Scheme = "https"
 
 	//Work out the url that the SSO would redirect back to
-	redirectUrl := clientRequestUrl.String()
-	expectedReturnUrl := fmt.Sprintf("%s://%s%s?%s=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, callbackPath, redirectUriQuerystringParameterName, url.QueryEscape(redirectUrl))
+	expectedReturnUrl := fmt.Sprintf("%s://%s%s?%s=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, callbackPath, redirectUriQuerystringParameterName, url.QueryEscape(clientRequestUrl.String()))
 	expectedRedirectorUrl := fmt.Sprintf("%s://%s%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath)
 
 	req := testhelpers.MustNewRequest(http.MethodGet, expectedReturnUrl, nil)
@@ -718,76 +797,27 @@ func TestWithRedirectFromSsoButIdTokenIsStoredInBookmarkSuccess(t *testing.T) {
 }
 
 func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		return jwtConfiguration
+	})
+
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	ts, err := getMiddlewareServer(jwtConfiguration)
-	if err != nil {
-		panic(err)
-	}
-	defer ts.Close()
-
-	client := getClient()
-
-	clientRequestUrl, err := url.Parse(ts.URL)
-	if err != nil {
-		panic(err)
-	}
-
-	if clientRequestUrl.Path == ""{
-		clientRequestUrl.Path = "/"
-	}
-
-	clientRequestUrl.Scheme = "https"
-
-	nonce := uuid.Get()
-	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-
-	//Work out the url that the SSO would redirect back to
-	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
-	if err != nil {
-		panic(err)
-	}
-
-	//Need the signing key to use for mac of url, so just use the one we use for JWT
-	privateKeyPemData, err := certificate.KeyFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
-	if err != nil {
-		panic(err)
-	}
-
-	addMacHashToUrl(expectedRedirectorUrl, privateKey)
-
-	claims := &jwt.StandardClaims{}
-	claims.Issuer = jwksServer.URL
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = "0"
-
-	signedToken, err := token.SignedString(privateKey)
+	client, _, _, signedToken, clientRequestUrl, expectedRedirectorUrl, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}
 
 	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
-
-	cookie := &http.Cookie{
-		Name:  sessionCookieName,
-		Value: signedToken,
-	}
-	req.AddCookie(cookie)
-
+	addTokenToRequest(req, TokenMethodCookie, signedToken)
 	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
@@ -807,64 +837,21 @@ func TestRedirectorWithValidCookieAndValidHashSuccess(t *testing.T) {
 }
 
 func TestRedirectorWithInvalidCookieAndValidHashSuccess(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		return jwtConfiguration
+	})
+
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	ts, err := getMiddlewareServer(jwtConfiguration)
-	if err != nil {
-		panic(err)
-	}
-	defer ts.Close()
-
-	client := getClient()
-
-	clientRequestUrl, err := url.Parse(ts.URL)
-	if err != nil {
-		panic(err)
-	}
-
-	if clientRequestUrl.Path == ""{
-		clientRequestUrl.Path = "/"
-	}
-
-	clientRequestUrl.Scheme = "https"
-
-	nonce := uuid.Get()
-	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-
-	//Work out the url that the SSO would redirect back to
-	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
-	if err != nil {
-		panic(err)
-	}
-
-	//Need the signing key to use for mac of url, so just use the one we use for JWT
-	privateKeyPemData, err := certificate.KeyFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
-	if err != nil {
-		panic(err)
-	}
-
-	addMacHashToUrl(expectedRedirectorUrl, privateKey)
-
-	claims := &jwt.StandardClaims{}
-	claims.Issuer = jwksServer.URL
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = "0"
-
-	signedToken, err := token.SignedString(privateKey)
+	client, _, _, signedToken, _, expectedRedirectorUrl, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -896,77 +883,27 @@ func TestRedirectorWithInvalidCookieAndValidHashSuccess(t *testing.T) {
 }
 
 func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t *testing.T) {
-	certificate, jwksServer, oidcDiscoveryUri, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		return jwtConfiguration
+	})
+
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.DiscoveryAddress = oidcDiscoveryUri.String()
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	ts, err := getMiddlewareServer(jwtConfiguration)
-	if err != nil {
-		panic(err)
-	}
-	defer ts.Close()
-
-	client := getClient()
-
-	clientRequestUrl, err := url.Parse(ts.URL)
-	if err != nil {
-		panic(err)
-	}
-
-	if clientRequestUrl.Path == ""{
-		clientRequestUrl.Path = "/"
-	}
-
-	clientRequestUrl.Scheme = "https"
-
-	nonce := uuid.Get()
-	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-
-	//Work out the url that the SSO would redirect back to
-	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
-	if err != nil {
-		panic(err)
-	}
-
-	//Need the signing key to use for mac of url, so just use the one we use for JWT
-	privateKeyPemData, err := certificate.KeyFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
-	if err != nil {
-		panic(err)
-	}
-
-	addMacHashToUrl(expectedRedirectorUrl, privateKey)
-
-	claims := &jwt.StandardClaims{}
-	claims.Issuer = jwksServer.URL
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = "0"
-
-	signedToken, err := token.SignedString(privateKey)
+	client, _, _, signedToken, clientRequestUrl, expectedRedirectorUrl, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}
 
 	req := testhelpers.MustNewRequest(http.MethodGet, expectedRedirectorUrl.String(), nil)
-
-	cookie := &http.Cookie{
-		Name:  sessionCookieName,
-		Value: signedToken,
-	}
-
-	req.AddCookie(cookie)
-
+	addTokenToRequest(req, TokenMethodCookie, signedToken)
 	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
@@ -986,64 +923,21 @@ func TestRedirectorWithValidCookieAndValidHashAndUsingDiscoveryAddressSuccess(t 
 }
 
 func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
-	certificate, jwksServer, _, _, err := getCertificateFromPathAndJwksServer("signing/rsa", "signing/rsa")
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+
+		return jwtConfiguration
+	})
+
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
+	defer middlwareServer.Close()
 
-	jwtConfiguration := &types.Jwt{}
-	jwtConfiguration.Issuer = jwksServer.URL
-	jwtConfiguration.SsoAddressTemplate = "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
-	jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
-
-	ts, err := getMiddlewareServer(jwtConfiguration)
-	if err != nil {
-		panic(err)
-	}
-	defer ts.Close()
-
-	client := getClient()
-
-	clientRequestUrl, err := url.Parse(ts.URL)
-	if err != nil {
-		panic(err)
-	}
-
-	if clientRequestUrl.Path == ""{
-		clientRequestUrl.Path = "/"
-	}
-
-	clientRequestUrl.Scheme = "https"
-
-	nonce := uuid.Get()
-	issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-
-	//Work out the url that the SSO would redirect back to
-	expectedRedirectorUrl, err := url.Parse(fmt.Sprintf("%s://%s%s?iat=%s&nonce=%s&redirect_uri=%s", clientRequestUrl.Scheme, clientRequestUrl.Host, redirectorPath, issuedAt, nonce, url.QueryEscape(clientRequestUrl.String())))
-	if err != nil {
-		panic(err)
-	}
-
-	//Need the signing key to use for mac of url, so just use the one we use for JWT
-	privateKeyPemData, err := certificate.KeyFile.Read()
-	if err != nil {
-		panic(err)
-	}
-
-	privateKey, err := GetPrivateKeyFromPem(privateKeyPemData)
-	if err != nil {
-		panic(err)
-	}
-
-	addMacHashToUrl(expectedRedirectorUrl, privateKey)
-
-	claims := &jwt.StandardClaims{}
-	claims.Issuer = jwksServer.URL
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
-	token.Header["kid"] = "0"
-
-	signedToken, err := token.SignedString(privateKey)
+	client, _, _, signedToken, _, expectedRedirectorUrl, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
 	if err != nil {
 		panic(err)
 	}

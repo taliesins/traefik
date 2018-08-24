@@ -15,6 +15,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"regexp"
 )
 
 type JwtValidator struct {
@@ -66,6 +67,64 @@ func getExpiredSessionCookie(requestUrl *url.URL) (*http.Cookie){
 	sessionCookie.Expires = time.Now().Add(-100 * time.Hour)
 
 	return sessionCookie
+}
+
+func validateClaim(claims jwt.MapClaims, claimName string, claimValidationRegex *regexp.Regexp)(error){
+	if claimValidationRegex != nil {
+		var claimValue string
+		if claims[claimName] != nil {
+			claimValue = claims[claimName].(string)
+		} else {
+			claimValue = ""
+		}
+
+		if !claimValidationRegex.MatchString(claimValue){
+			return fmt.Errorf("failed validation on %s claim as value is %s", claimName, claimValue)
+		}
+	}
+	return nil
+}
+
+func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRegex *regexp.Regexp, audienceValidationRegex *regexp.Regexp, token *jwt.Token)(publicKey interface{}, err error){
+	var claims jwt.MapClaims
+	if issuerValidationRegex != nil || audienceValidationRegex != nil {
+		claims = token.Claims.(jwt.MapClaims)
+
+		err = validateClaim(claims, "iss", issuerValidationRegex)
+		if err != nil {
+			return nil, err
+		}
+
+		err = validateClaim(claims, "aud", audienceValidationRegex)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	//public keys are calculated JIT as they are dynamic
+	if config.JwksAddress != "" {
+		publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
+		if err != nil {
+			log.Infof("Unable to get public key from jwks address %s for kid %s with error %s", config.JwksAddress, kid, err)
+		}
+	} else if config.DiscoveryAddress != "" {
+		publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
+		if err != nil {
+			log.Infof("Unable to get public key from discovery address %s for kid %s with error %s", config.DiscoveryAddress, kid, err)
+		}
+	} else if config.Issuer != "" {
+		publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
+		if err != nil {
+			log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+		}
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	//TODO: Validate for ES256,ES384,ES512?
+	return publicKey, nil
 }
 
 func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
@@ -121,6 +180,52 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		}
 	} else {
 		urlHashPrivateKey = nil
+	}
+
+	//Validations
+	var algorithmValidationRegex *regexp.Regexp
+	if config.AlgorithmValidationRegex != "" {
+		algorithmValidationRegex, err = regexp.Compile(config.AlgorithmValidationRegex)
+		if err != nil {
+			log.Errorf("Unable to parse config AlgorithmValidationRegex: %s", err)
+			return nil, err
+		}
+	} else {
+		algorithmValidationRegex = nil
+	}
+
+	var issuerValidationRegex *regexp.Regexp
+	if config.IssuerValidationRegex != "" {
+		issuerValidationRegex, err = regexp.Compile(config.IssuerValidationRegex)
+		if err != nil {
+			log.Errorf("Unable to parse config IssuerValidationRegex: %s", err)
+			return nil, err
+		}
+	} else {
+		issuerValidationRegex = nil
+	}
+
+	var audienceValidationRegex *regexp.Regexp
+	if config.AudienceValidationRegex != "" {
+		audienceValidationRegex, err = regexp.Compile(config.AudienceValidationRegex)
+		if err != nil {
+			log.Errorf("Unable to parse config AudienceValidationRegex: %s", err)
+			return nil, err
+		}
+	} else {
+		audienceValidationRegex = nil
+	}
+
+	//Paths to skip OIDC on
+	var ignorePathRegex *regexp.Regexp
+	if config.IgnorePathRegex != "" {
+		ignorePathRegex, err = regexp.Compile(config.IgnorePathRegex)
+		if err != nil {
+			log.Errorf("Unable to parse config IgnorePathRegex: %s", err)
+			return nil, err
+		}
+	} else {
+		ignorePathRegex = nil
 	}
 
 	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
@@ -238,17 +343,20 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
 			algHeader, ok := token.Header["alg"]
 			if !ok {
-				return nil, fmt.Errorf("Cannot get alg to use")
+				return nil, fmt.Errorf("Cannot get algorithm to use")
 			}
 			alg := algHeader.(string)
 
-			//TODO: Validate allowed algs here
-			//return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
+			if algorithmValidationRegex != nil && !algorithmValidationRegex.MatchString(alg) {
+				return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
+			}
 
-			kid := ""
+			var kid string
 			kidHeader, ok := token.Header["kid"]
 			if ok {
 				kid = kidHeader.(string)
+			} else {
+				kid = ""
 			}
 
 			if clientSecret != nil && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
@@ -260,61 +368,9 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return publicKey, nil
 			}
 
-			// If kid exists then we using dynamic public keys
+			// If kid exists then we using dynamic public keys (oidc)
 			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "") {
-				/*
-				claims := token.Claims.(jwt.MapClaims)
-
-				iss := ""
-				if claims["iss"] != nil {
-					iss = claims["iss"].(string)
-				}
-
-				aud := ""
-				if claims["aud"] != nil {
-					aud = claims["aud"].(string)
-				}
-
-				//Todo: Add all the validations required
-
-				if config.Issuer != "" && iss != config.Issuer {
-					return nil, fmt.Errorf("Cannot validate iss claim")
-				}
-
-				if config.Audience != "" && aud != config.Audience {
-					return nil, fmt.Errorf("Cannot validate audience claim")
-				}
-				*/
-
-				var (
-					err       error
-					publicKey interface{}
-				)
-
-				//public keys are calculated JIT as they are dynamic
-				if config.JwksAddress != "" {
-					publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
-					if err != nil {
-						log.Infof("Unable to get public key from jwks address %s for kid %s with error %s", config.JwksAddress, kid, err)
-					}
-				} else if config.DiscoveryAddress != "" {
-					publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
-					if err != nil {
-						log.Infof("Unable to get public key from discovery address %s for kid %s with error %s", config.DiscoveryAddress, kid, err)
-					}
-				} else if config.Issuer != "" {
-					publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
-					if err != nil {
-						log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
-					}
-				}
-
-				if err != nil {
-					return nil, err
-				}
-
-				//TODO: Validate for ES256,ES384,ES512?
-				return publicKey, nil
+				return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, token)
 			}
 
 			return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
@@ -322,7 +378,12 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 	})
 
 	jwtHandlerFunc := func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-		//Todo: White list of paths that do not have to be authenticated
+		if ignorePathRegex != nil && ignorePathRegex.MatchString(r.URL.Path) {
+			if next != nil {
+				next(w, r)
+			}
+			return
+		}
 
 		if r != nil && r.URL != nil && strings.HasPrefix(r.URL.Path, robotsPath) {
 			w.WriteHeader(http.StatusOK)

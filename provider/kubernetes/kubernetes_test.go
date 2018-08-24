@@ -1152,6 +1152,18 @@ func TestIngressAnnotations(t *testing.T) {
 		),
 		buildIngress(
 			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthOidcIssuer, "https://login.microsoftonline.com/fabrikam.onmicrosoft.com"),
+			iAnnotation(annotationKubernetesAuthOidcSsoAddressTemplate, "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login"),
+			iAnnotation(annotationKubernetesAuthOidcUrlMacPrivateKey, "mySecret"),
+			iAnnotation(annotationKubernetesAuthOidcIgnorePathRegex, ".*"),
+			iRules(
+				iRule(
+					iHost("oidc-ignore-path-regexs"),
+					iPaths(onePath(iPath("/ignore-path-regexs"), iBackend("service1", intstr.FromInt(80))))),
+			),
+		),
+		buildIngress(
+			iNamespace("testing"),
 			iAnnotation(annotationKubernetesIngressClass, traefikDefaultRealm+"-other"),
 			iRules(
 				iRule(
@@ -1475,6 +1487,12 @@ rateset:
 					server("http://example.com", weight(1))),
 				lbMethod("wrr"),
 			),
+			backend("oidc-ignore-path-regexs/ignore-path-regexs",
+				servers(
+					server("http://example.com", weight(1)),
+					server("http://example.com", weight(1))),
+				lbMethod("wrr"),
+			),
 			backend("redirect/https",
 				servers(
 					server("http://example.com", weight(1)),
@@ -1590,35 +1608,35 @@ rateset:
 			),
 			frontend("jwt-shared-secret/shared-secret",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", "", "", "", "", "", "", ""),
 				routes(
 					route("/shared-secret", "PathPrefix:/shared-secret"),
 					route("jwt-shared-secret", "Host:jwt-shared-secret")),
 			),
 			frontend("jwt-public-key/public-key",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "publicKey","", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "", "publicKey","", "", "", "", "", "", "", ""),
 				routes(
 					route("/public-key", "PathPrefix:/public-key"),
 					route("jwt-public-key", "Host:jwt-public-key")),
 			),
 			frontend("oidc-issuer-uri/issuer-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "", "", "", "", "", ""),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/issuer-uri", "PathPrefix:/issuer-uri"),
 					route("oidc-issuer-uri", "Host:oidc-issuer-uri")),
 			),
 			frontend("oidc-discovery-uri/discovery-uri",
 				passHostHeader(),
-				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration","", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration","", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/discovery-uri", "PathPrefix:/discovery-uri"),
 					route("oidc-discovery-uri", "Host:oidc-discovery-uri")),
 			),
 			frontend("oidc-jwks-uri/jwks-uri",
 				passHostHeader(),
-				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/jwks-uri", "PathPrefix:/jwks-uri"),
 					route("oidc-jwks-uri", "Host:oidc-jwks-uri")),
@@ -1626,7 +1644,7 @@ rateset:
 			frontend("oidc-url-mac-client-secret/url-mac-client-secret",
 				passHostHeader(),
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "",
-					"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",  "", "myUser:myEncodedPW", "", "", ""),
+					"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",  "", "myUser:myEncodedPW", "", "", "", ""),
 				routes(
 					route("/url-mac-client-secret", "PathPrefix:/url-mac-client-secret"),
 					route("oidc-url-mac-client-secret", "Host:oidc-url-mac-client-secret")),
@@ -1636,7 +1654,7 @@ rateset:
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
 					"", "", "",
 					"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
-					"myUser:myEncodedPW", "", "", "", ""),
+					"myUser:myEncodedPW", "", "", "", "", ""),
 				routes(
 					route("/url-mac-private-key", "PathPrefix:/url-mac-private-key"),
 					route("oidc-url-mac-private-key", "Host:oidc-url-mac-private-key")),
@@ -1645,10 +1663,19 @@ rateset:
 				passHostHeader(),
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
 					"", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
-					"myUser:myEncodedPW", "", ".*test.*", ".*test.*", ".*test.*"),
+					"myUser:myEncodedPW", "", ".*test.*", ".*test.*", ".*test.*", ""),
 				routes(
 					route("/validation-regexs", "PathPrefix:/validation-regexs"),
 					route("oidc-validation-regexs", "Host:oidc-validation-regexs")),
+			),
+			frontend("oidc-ignore-path-regexs/ignore-path-regexs",
+				passHostHeader(),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
+					"", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
+					"myUser:myEncodedPW", "", "", "", "", ".*"),
+				routes(
+					route("/ignore-path-regexs", "PathPrefix:/ignore-path-regexs"),
+					route("oidc-ignore-path-regexs", "Host:oidc-ignore-path-regexs")),
 			),
 			frontend("redirect/https",
 				passHostHeader(),

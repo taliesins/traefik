@@ -612,6 +612,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 	issuerValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcIssuerValidationRegex, "")
 	audienceValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAudienceValidationRegex, "")
 	algorithmValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAlgorithmValidationRegex, "")
+	ignorePathRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcIgnorePathRegex, "")
 
 	jwt := types.Jwt{
 		PublicKey:          publicKey,
@@ -623,6 +624,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 		IssuerValidationRegex: issuerValidationRegex,
 		AudienceValidationRegex: audienceValidationRegex,
 		AlgorithmValidationRegex: algorithmValidationRegex,
+		IgnorePathRegex: ignorePathRegex,
 	}
 
 	if jwt.Issuer == "" && jwt.Audience == "" && jwt.JwksAddress == "" && oidcDiscoveryAddress == "" && urlMacPrivateKeyKey == "" && urlMacClientSecretKey == "" && publicKey == "" && clientSecretKey == ""  {

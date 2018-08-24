@@ -226,6 +226,7 @@ type Jwt struct {
 	AlgorithmValidationRegex string `json:"algorithmValidationRegex,omitempty"`
 	AudienceValidationRegex string `json:"audienceValidationRegex,omitempty"`
 	IssuerValidationRegex string `json:"issuerValidationRegex,omitempty"`
+	IgnorePathRegex string `json:"ignorePathRegex,omitempty"`
 }
 
 // LoadBalancerMethod holds the method of load balancing to use.
