@@ -963,3 +963,97 @@ func TestRedirectorWithValidPostAndValidHashSuccess(t *testing.T) {
 	assert.EqualValues(t, "", string(body), "Should be equal")
 }
 
+func TestWithNoAuthenticationAndIgnorePathMatched(t *testing.T) {
+	var expectedSsoAddressTemplate string
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+		jwtConfiguration.IgnorePathRegex = "/"
+
+		expectedSsoAddressTemplate = jwtConfiguration.SsoAddressTemplate
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	//client, nonce, issuedAt, signedToken, expectedRedirectorUrl, err
+	client, _, _, _, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	stringBody := string(body)
+
+	assert.Equal(t, "{\"RequestUri\":\"/\", \"Referer\":\"\"}\n", stringBody, "they should equal")
+}
+
+func TestWithNoAuthenticationAndIgnorePathNotMatched(t *testing.T) {
+	var expectedSsoAddressTemplate string
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers("signing/rsa", "signing/rsa", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.Issuer = issuerUri.String()
+		jwtConfiguration.SsoAddressTemplate = ssoAddressTemplate
+		jwtConfiguration.UrlMacPrivateKey = certificate.KeyFile.String()
+		jwtConfiguration.IgnorePathRegex = "!/"
+
+		expectedSsoAddressTemplate = jwtConfiguration.SsoAddressTemplate
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	//client, nonce, issuedAt, signedToken, expectedRedirectorUrl, err
+	client, nonce, _, _, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, jwt.SigningMethodRS256, "", nil, nil, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+
+	expectedRedirectUri, err := url.Parse(res.Request.URL.String())
+	if err != nil {
+		panic(err)
+	}
+
+	expectedRedirectUri.Path = callbackPath
+
+	expectedBodyRegex, err := regexp.Compile("\n<!DOCTYPE html><html><head><title></title></head><body>\n\n<script>\nwindow.location.replace\\('(.*)'\\);\n</script>\nPlease sign in at <a href='(.*)'>(.*)</a>\n</body></html>\n\n")
+	expectedBodyMatches := expectedBodyRegex.FindStringSubmatch(string(body))
+	assert.Len(t, expectedBodyMatches, 4, "Expect 4 matches")
+	bodyMatch := expectedBodyMatches[1]
+
+	redirectUrlRegex := strings.Replace(strings.Replace(strings.Replace(templateToRegexFixer(expectedSsoAddressTemplate), "{{.CallbackUrl}}", "(.*)", -1), "{{.State}}", "(.*)", -1), "{{.Nonce}}", "(.*)", -1)
+	expectedRedirectUrlRegex, err := regexp.Compile(redirectUrlRegex)
+	expectedRedirectUrlMatches := expectedRedirectUrlRegex.FindStringSubmatch(bodyMatch)
+	assert.Len(t, expectedRedirectUrlMatches, 4, "Expect 4 matches")
+	nonceMatch := expectedRedirectUrlMatches[1]
+	redirectUriMatch := expectedRedirectUrlMatches[2]
+	stateMatch := expectedRedirectUrlMatches[3]
+
+	assert.Equal(t, nonce, nonceMatch, "nonce should be specified")
+	assert.EqualValues(t, url.QueryEscape(expectedRedirectUri.String()), redirectUriMatch, "redirect_uri should be specified")
+	assert.NotEqual(t, url.QueryEscape(""), stateMatch, "state should be specified")
+}
