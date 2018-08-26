@@ -612,6 +612,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 	issuerValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcIssuerValidationRegex, "")
 	audienceValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAudienceValidationRegex, "")
 	algorithmValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcAlgorithmValidationRegex, "")
+	subjectValidationRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcSubjectValidationRegex, "")
 	ignorePathRegex := getStringValue(i.Annotations, annotationKubernetesAuthOidcIgnorePathRegex, "")
 
 	jwt := types.Jwt{
@@ -624,6 +625,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 		IssuerValidationRegex: issuerValidationRegex,
 		AudienceValidationRegex: audienceValidationRegex,
 		AlgorithmValidationRegex: algorithmValidationRegex,
+		SubjectValidationRegex: subjectValidationRegex,
 		IgnorePathRegex: ignorePathRegex,
 	}
 

@@ -85,9 +85,9 @@ func validateClaim(claims jwt.MapClaims, claimName string, claimValidationRegex 
 	return nil
 }
 
-func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRegex *regexp.Regexp, audienceValidationRegex *regexp.Regexp, token *jwt.Token)(publicKey interface{}, err error){
+func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRegex *regexp.Regexp, audienceValidationRegex *regexp.Regexp, subjectValidationRegex *regexp.Regexp, token *jwt.Token)(publicKey interface{}, err error){
 	var claims jwt.MapClaims
-	if issuerValidationRegex != nil || audienceValidationRegex != nil {
+	if issuerValidationRegex != nil || audienceValidationRegex != nil || subjectValidationRegex != nil {
 		claims = token.Claims.(jwt.MapClaims)
 
 		err = validateClaim(claims, "iss", issuerValidationRegex)
@@ -96,6 +96,11 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		}
 
 		err = validateClaim(claims, "aud", audienceValidationRegex)
+		if err != nil {
+			return nil, err
+		}
+
+		err = validateClaim(claims, "sub", subjectValidationRegex)
 		if err != nil {
 			return nil, err
 		}
@@ -214,6 +219,17 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		}
 	} else {
 		audienceValidationRegex = nil
+	}
+
+	var subjectValidationRegex *regexp.Regexp
+	if config.SubjectValidationRegex != "" {
+		subjectValidationRegex, err = regexp.Compile(config.SubjectValidationRegex)
+		if err != nil {
+			log.Errorf("Unable to parse config AudienceValidationRegex: %s", err)
+			return nil, err
+		}
+	} else {
+		subjectValidationRegex = nil
 	}
 
 	//Paths to skip OIDC on
@@ -370,7 +386,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 
 			// If kid exists then we using dynamic public keys (oidc)
 			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "") {
-				return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, token)
+				return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, subjectValidationRegex, token)
 			}
 
 			return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")

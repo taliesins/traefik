@@ -226,6 +226,7 @@ type Jwt struct {
 	AlgorithmValidationRegex string `json:"algorithmValidationRegex,omitempty"`
 	AudienceValidationRegex string `json:"audienceValidationRegex,omitempty"`
 	IssuerValidationRegex string `json:"issuerValidationRegex,omitempty"`
+	SubjectValidationRegex string `json:"subjectValidationRegex,omitempty"`
 	IgnorePathRegex string `json:"ignorePathRegex,omitempty"`
 }
 

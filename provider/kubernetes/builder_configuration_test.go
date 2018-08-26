@@ -259,7 +259,7 @@ func fwdAuthTLS(cert, key string, insecure bool) func(*types.Forward) {
 
 func jwtAuth(issuer, audience, jwksAddress, oidcDiscoveryAddress, publicKey, clientSecret,
 	ssoAddressTemplate, urlMacPrivateKey, urlMacClientSecret string, algorithmValidationRegex string,
-		audienceValidationRegex string, issuerValidationRegex string, ignorePathRegex string) func(*types.Frontend) {
+		audienceValidationRegex string, issuerValidationRegex string, subjectValidationRegex string, ignorePathRegex string) func(*types.Frontend) {
 	return func(f *types.Frontend) {
 		f.Jwt = &types.Jwt{
 			Issuer:             issuer,
@@ -274,6 +274,7 @@ func jwtAuth(issuer, audience, jwksAddress, oidcDiscoveryAddress, publicKey, cli
 			AlgorithmValidationRegex: algorithmValidationRegex,
 			AudienceValidationRegex: audienceValidationRegex,
 			IssuerValidationRegex: issuerValidationRegex,
+			SubjectValidationRegex: subjectValidationRegex,
 			IgnorePathRegex: ignorePathRegex,
 		}
 	}
