@@ -319,6 +319,56 @@ The following limitations hold for basic/digest auth:
 - The realm is not configurable; the only supported (and default) value is `traefik`.
 - The Secret must contain a single file only.
 
+### JWT
+
+Additional JWT annotations can be added to the Ingress object.
+The source of the authentication is a Secret object that contains the credentials.
+
+| Annotation                                                | Description                                                                                                  |
+|-----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| `ingress.kubernetes.io/auth-jwt-public-key: mycert`       | Name of Secret containing the public key to validate JWT token. OIDC should be prefered over JWT token only. |
+| `ingress.kubernetes.io/auth-jwt-client-secret: mysecret`  | Name of Secret containing the password to validate JWT token. Public key should be prefered over password.   |
+
+Either `auth-jwt-public-key` or `auth-jwt-client-secret` should be specified, but not both. The prefered choice is `auth-jwt-public-key`.
+
+### OIDC
+
+Additional OIDC annotations can be added to the Ingress object.
+The source of the authentication is a Secret object that contains the credentials.
+
+| Annotation                                                           | Description                                                                                       |
+|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `ingress.kubernetes.io/auth-oidc-audience: VALUE`                    | The OIDC audience.                                                                                |
+| `ingress.kubernetes.io/auth-oidc-issuer: VALUE`                      | The OIDC issuer.                                                                                  |
+| `ingress.kubernetes.io/auth-oidc-jwks-address: VALUE`                | The OIDC JWKS address.                                                                            |
+| `ingress.kubernetes.io/auth-oidc-discovery-address: VALUE`           | The OIDC well known endpoint.                                                                     |
+| `ingress.kubernetes.io/auth-oidc-sso-address-template: EXPR`         | The SSO redirect url to use. `{{Nonce}}` token will be replaced with nonce value for this request. `{{.CallbackUrl}}` will be the url to redirect to when OIDC login is complete. `{{.State}}` will be replaced with the original request url but it will also be hmac signed.  |
+| `ingress.kubernetes.io/auth-oidc-url-mac-client-secret: mysecret`    | Name of Secret containing the password to use for HMAC of redirect url. Private key should be prefered over password.|
+| `ingress.kubernetes.io/auth-oidc-url-mac-private-key: mycert`        | Name of Secret containing the private key to use for HMAC of redirect url.                        |
+| `ingress.kubernetes.io/auth-oidc-algorithm-validation-regex: EXPR`   | Regex of the algorithms to allow.                                                                 |
+| `ingress.kubernetes.io/auth-oidc-audience-validation-regex: EXPR`    | Regex of the audiences to allow.                                                                  |
+| `ingress.kubernetes.io/auth-oidc-issuer-validation-regex: EXPR`      | Regex of the issuers to allow.                                                                    |
+| `ingress.kubernetes.io/auth-oidc-subject-validation-regex: EXPR`     | Regex of the subjects to allow.                                                                   |
+| `ingress.kubernetes.io/auth-oidc-ignore-path-regex: EXPR`            | Regex of paths to ignore OIDC validation on.                                                      |
+
+For token validation at least one of `auth-oidc-issuer`, `auth-oidc-discovery-address` or `auth-oidc-jwks-address` should be specified.
+
+The secret for `auth-oidc-url-mac-client-secret` and `auth-oidc-url-mac-private-key` must be created in the same namespace as the Ingress object. Either `auth-oidc-url-mac-client-secret` or `auth-oidc-url-mac-private-key` should be specified, but not both. The prefered choice is `auth-oidc-url-mac-private-key`.
+
+#### Example OIDC Configuration for Azure B2C
+
+```
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    ingress.kubernetes.io/auth-oidc-issuer: "https://login.microsoftonline.com/$B2C_TENANT_ID/v2.0/"
+    ingress.kubernetes.io/auth-oidc-discovery-address: "https://login.microsoftonline.com/$B2C_TENANT_NAME/v2.0/.well-known/openid-configuration?p=$B2C_PROFILE_NAME"
+    ingress.kubernetes.io/auth-oidc-sso-address-template: "https://login.microsoftonline.com/$B2C_TENANT_NAME/oauth2/v2.0/authorize?p=$B2C_PROFILE_NAME&client_id=$B2C_CLIENT_ID&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
+    ingress.kubernetes.io/auth-oidc-url-mac-client-secret: "default-url-mac-client-secret"
+```
+* replace `$B2C_TENANT_ID` with your guid e.g. `31537af4-6d77-4bb9-a681-d2394888ea2`|
+* replace `$B2C_TENANT_NAME` with your login domain e.g. `contoso.onmicrosoft.com`
+* replace `$B2C_PROFILE_NAME` with your B2C profile to use e.g. `B2C_1A_Google`
+
 ### TLS certificates management
 
 TLS certificates can be managed in Secrets objects.
