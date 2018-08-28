@@ -2854,11 +2854,21 @@ func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
 	path := "/url-mac-client-secret"
 	secretKey := "mySecret"
 	secretValue := "mySecretIsBob"
+	authOidcAlgorithmValidationRegex := "Algorithm"
+	authOidcIgnorePathRegex := "IgnorePath"
+	authOidcAudienceValidationRegex := "Audience"
+	authOidcSubjectValidationRegex := "Subject"
+	authOidcIssuerValidationRegex := "Issuer"
 
 	ingresses := []*extensionsv1beta1.Ingress{
 		buildIngress(
 			iNamespace("testing"),
 			iAnnotation(annotationKubernetesAuthOidcUrlMacClientSecret, secretKey),
+			iAnnotation(annotationKubernetesAuthOidcAlgorithmValidationRegex, authOidcAlgorithmValidationRegex),
+			iAnnotation(annotationKubernetesAuthOidcAudienceValidationRegex, authOidcAudienceValidationRegex),
+			iAnnotation(annotationKubernetesAuthOidcIssuerValidationRegex, authOidcIssuerValidationRegex),
+			iAnnotation(annotationKubernetesAuthOidcSubjectValidationRegex, authOidcSubjectValidationRegex),
+			iAnnotation(annotationKubernetesAuthOidcIgnorePathRegex, authOidcIgnorePathRegex),
 			iRules(
 				iRule(
 					iHost(host),
@@ -2909,12 +2919,62 @@ func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
 		t.Fatalf("unexpected oidc url mac client secret from ingress: %+v", actual.Frontends[host + path])
 	}
 
+	got = actual.Frontends[host + path].Jwt.AlgorithmValidationRegex
+	if got != authOidcAlgorithmValidationRegex {
+		t.Fatalf("unexpected oidc algorithm validation regex from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.AudienceValidationRegex
+	if got != authOidcAudienceValidationRegex {
+		t.Fatalf("unexpected oidc audience validation regex from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.IssuerValidationRegex
+	if got != authOidcIssuerValidationRegex {
+		t.Fatalf("unexpected oidc issuer validation regex from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.SubjectValidationRegex
+	if got != authOidcSubjectValidationRegex {
+		t.Fatalf("unexpected oidc subject validation regex from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.IgnorePathRegex
+	if got != authOidcIgnorePathRegex {
+		t.Fatalf("unexpected oidc ignore path regex from ingress: %+v", actual.Frontends[host + path])
+	}
+
 	actual = provider.loadConfig(*actual)
 
 	require.NotNil(t, actual)
 	got = actual.Frontends[host + path].Jwt.UrlMacClientSecret
 	if got != secretValue {
 		t.Fatalf("unexpected oidc url mac client secret from loadConfig: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.AlgorithmValidationRegex
+	if got != authOidcAlgorithmValidationRegex {
+		t.Fatalf("unexpected oidc algorithm validation regex from loadConfig: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.AudienceValidationRegex
+	if got != authOidcAudienceValidationRegex {
+		t.Fatalf("unexpected oidc audience validation regex from loadConfig: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.IssuerValidationRegex
+	if got != authOidcIssuerValidationRegex {
+		t.Fatalf("unexpected oidc issuer validation regex from loadConfig: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.SubjectValidationRegex
+	if got != authOidcSubjectValidationRegex {
+		t.Fatalf("unexpected oidc subject validation regex from loadConfig: %+v", actual.Frontends[host + path])
+	}
+
+	got = actual.Frontends[host + path].Jwt.IgnorePathRegex
+	if got != authOidcIgnorePathRegex {
+		t.Fatalf("unexpected oidc ignore path regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 }
 
