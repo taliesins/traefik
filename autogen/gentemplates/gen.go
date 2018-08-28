@@ -943,6 +943,12 @@ var _templatesKubernetesTmpl = []byte(`[backends]
       ssoAddressTemplate = "{{ $frontend.Jwt.SsoAddressTemplate }}"
       urlMacClientSecret = "{{ $frontend.Jwt.UrlMacClientSecret }}"
       urlMacPrivateKey = """{{ $frontend.Jwt.UrlMacPrivateKey }}"""
+
+      algorithmValidationRegex = "{{ $frontend.Jwt.AlgorithmValidationRegex }}"
+      audienceValidationRegex = "{{ $frontend.Jwt.AudienceValidationRegex }}"
+      issuerValidationRegex = "{{ $frontend.Jwt.IssuerValidationRegex }}"
+      subjectValidationRegex = "{{ $frontend.Jwt.SubjectValidationRegex }}"
+      ignorePathRegex = "{{ $frontend.Jwt.IgnorePathRegex }}"
     {{end}}
 
     {{if $frontend.RateLimit }}
