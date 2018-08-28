@@ -1057,3 +1057,71 @@ func TestWithNoAuthenticationAndIgnorePathNotMatched(t *testing.T) {
 	assert.EqualValues(t, url.QueryEscape(expectedRedirectUri.String()), redirectUriMatch, "redirect_uri should be specified")
 	assert.NotEqual(t, url.QueryEscape(""), stateMatch, "state should be specified")
 }
+
+func TestWithValidCredentialsButAlgorithmRegexSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodES256
+	certificatePath := "signing/es256"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		certContent, err := certificate.CertFile.Read()
+		if err != nil {
+			panic(err)
+		}
+
+		jwtConfiguration.PublicKey=string(certContent)
+		jwtConfiguration.AlgorithmValidationRegex="ES256"
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.Regexp(t, `{"RequestUri":"\/.*", "Referer":""}\n`, string(body), "they should be equal")
+}
+
+func TestWithValidCredentialsButAlgorithmRegexFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodES256
+	certificatePath := "signing/es256"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		certContent, err := certificate.CertFile.Read()
+		if err != nil {
+			panic(err)
+		}
+
+		jwtConfiguration.PublicKey=string(certContent)
+		jwtConfiguration.AlgorithmValidationRegex="NotMatched"
+
+		return jwtConfiguration
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+}
