@@ -606,6 +606,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 	audience := getStringValue(i.Annotations, annotationKubernetesAuthOidcAudience, "")
 	jwksAddress := getStringValue(i.Annotations, annotationKubernetesAuthOidcJwksAddress, "")
 	oidcDiscoveryAddress := getStringValue(i.Annotations, annotationKubernetesAuthOidcDiscoveryAddress, "")
+	useDynamicValidation := getBoolValue(i.Annotations, annotationKubernetesAuthOidcUseDynamicValidation, false)
 	ssoAddressTemplate := getStringValue(i.Annotations, annotationKubernetesAuthOidcSsoAddressTemplate, "")
 	urlMacClientSecretKey := getStringValue(i.Annotations, annotationKubernetesAuthOidcUrlMacClientSecret, "")
 	urlMacPrivateKeyKey := getStringValue(i.Annotations, annotationKubernetesAuthOidcUrlMacPrivateKey, "")
@@ -621,6 +622,7 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 		Audience:           audience,
 		JwksAddress:        jwksAddress,
 		DiscoveryAddress:   oidcDiscoveryAddress,
+		UseDynamicValidation: useDynamicValidation,
 		SsoAddressTemplate: ssoAddressTemplate,
 		IssuerValidationRegex: issuerValidationRegex,
 		AudienceValidationRegex: audienceValidationRegex,
@@ -633,11 +635,11 @@ func getJwtConfig(i *extensionsv1beta1.Ingress, k8sClient Client) (*types.Jwt, e
 		return nil, nil
 	}
 
-	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.Audience != "" {
+	if clientSecretKey == "" && publicKey == "" && jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.Audience != "" && jwt.UseDynamicValidation {
 		return nil, fmt.Errorf("annotation %v or %v or %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthJwtClientSecret, annotationKubernetesAuthJwtPublicKey, annotationKubernetesAuthOidcIssuer, annotationKubernetesAuthOidcDiscoveryAddress, annotationKubernetesAuthOidcJwksAddress, annotationKubernetesAuthOidcAudience)
 	}
 
-	if jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.SsoAddressTemplate != "" {
+	if jwt.Issuer == "" && jwt.DiscoveryAddress == "" && jwt.JwksAddress == "" && jwt.UseDynamicValidation && jwt.SsoAddressTemplate != "" {
 		return nil, fmt.Errorf("annotation %v or %v or %v must be set if annotation %v is specified", annotationKubernetesAuthOidcIssuer, annotationKubernetesAuthOidcDiscoveryAddress, annotationKubernetesAuthOidcJwksAddress, annotationKubernetesAuthOidcSsoAddressTemplate)
 	}
 

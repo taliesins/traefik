@@ -22,6 +22,7 @@ const (
 	annotationKubernetesAuthOidcIssuer                   = "ingress.kubernetes.io/auth-oidc-issuer"
 	annotationKubernetesAuthOidcJwksAddress              = "ingress.kubernetes.io/auth-oidc-jwks-address"
 	annotationKubernetesAuthOidcDiscoveryAddress         = "ingress.kubernetes.io/auth-oidc-discovery-address"
+	annotationKubernetesAuthOidcUseDynamicValidation     = "ingress.kubernetes.io/auth-oidc-use-dynamic-validation"
 	annotationKubernetesAuthOidcSsoAddressTemplate       = "ingress.kubernetes.io/auth-oidc-sso-address-template"
 	annotationKubernetesAuthOidcUrlMacClientSecret       = "ingress.kubernetes.io/auth-oidc-url-mac-client-secret"
 	annotationKubernetesAuthOidcUrlMacPrivateKey         = "ingress.kubernetes.io/auth-oidc-url-mac-private-key"

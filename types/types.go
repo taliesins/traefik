@@ -220,6 +220,7 @@ type Jwt struct {
 	Audience           string `json:"audience,omitempty"`
 	JwksAddress        string `json:"jwksAddress,omitempty"`
 	DiscoveryAddress   string `json:"discoveryAddress,omitempty"`
+	UseDynamicValidation bool `json:"useDynamicValidation,omitempty"`
 	SsoAddressTemplate string `json:"ssoAddressTemplate,omitempty"`
 	UrlMacClientSecret string `json:"urlMacClientSecret,omitempty"`
 	UrlMacPrivateKey   string `json:"urlMacPrivateKey,omitempty"`

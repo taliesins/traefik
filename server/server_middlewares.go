@@ -105,7 +105,7 @@ func (s *Server) buildMiddlewares(frontendName string, frontend *types.Frontend,
 	}
 
 	// JwtToken
-	if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.DiscoveryAddress != "" || frontend.Jwt.ClientSecret != "") {
+	if frontend.Jwt != nil && (frontend.Jwt.Issuer != "" || frontend.Jwt.Audience != "" || frontend.Jwt.JwksAddress != "" || frontend.Jwt.DiscoveryAddress != "" || frontend.Jwt.UseDynamicValidation || frontend.Jwt.ClientSecret != "" ) {
 		jwtValidatorMiddleware, err := mjwt.NewJwtValidator(frontend.Jwt, s.tracingMiddleware)
 
 		if err != nil {
@@ -113,7 +113,7 @@ func (s *Server) buildMiddlewares(frontendName string, frontend *types.Frontend,
 			return nil, nil, nil, err
 		}
 
-		log.Info(fmt.Sprintf(" Adding jwt middleware for: %s   Issuer: %s   Audience: %s   ClientSecret: %t   PublicKey: %t   DiscoveryAddress: %s   JwksAddress: %s   SsoAddressTemplate: %s   AlgorithmValidationRegex: %s   AudienceValidationRegex: %s   IssuerValidationRegex: %s   SubjectValidationRegex: %s IgnorePathRegex: %s", frontendName, frontend.Jwt.Issuer, frontend.Jwt.Audience, frontend.Jwt.ClientSecret != "", frontend.Jwt.PublicKey != "", frontend.Jwt.DiscoveryAddress, frontend.Jwt.JwksAddress, frontend.Jwt.SsoAddressTemplate, frontend.Jwt.AlgorithmValidationRegex, frontend.Jwt.AudienceValidationRegex, frontend.Jwt.IssuerValidationRegex, frontend.Jwt.SubjectValidationRegex, frontend.Jwt.IgnorePathRegex))
+		log.Info(fmt.Sprintf(" Adding jwt middleware for: %s   Issuer: %s   Audience: %s   ClientSecret: %t   PublicKey: %t   DiscoveryAddress: %s   JwksAddress: %s   UseDynamicValidation: %t   SsoAddressTemplate: %s   AlgorithmValidationRegex: %s   AudienceValidationRegex: %s   IssuerValidationRegex: %s   SubjectValidationRegex: %s IgnorePathRegex: %s", frontendName, frontend.Jwt.Issuer, frontend.Jwt.Audience, frontend.Jwt.ClientSecret != "", frontend.Jwt.PublicKey != "", frontend.Jwt.DiscoveryAddress, frontend.Jwt.JwksAddress, frontend.Jwt.UseDynamicValidation, frontend.Jwt.SsoAddressTemplate, frontend.Jwt.AlgorithmValidationRegex, frontend.Jwt.AudienceValidationRegex, frontend.Jwt.IssuerValidationRegex, frontend.Jwt.SubjectValidationRegex, frontend.Jwt.IgnorePathRegex))
 
 		handler := s.wrapNegroniHandlerWithAccessLog(jwtValidatorMiddleware.Handler, fmt.Sprintf("Auth for %s", frontendName))
 		middle = append(middle, handler)

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1609,42 +1610,42 @@ rateset:
 			),
 			frontend("jwt-shared-secret/shared-secret",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "", "myUser:myEncodedPW", "", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "", false, "", "myUser:myEncodedPW", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/shared-secret", "PathPrefix:/shared-secret"),
 					route("jwt-shared-secret", "Host:jwt-shared-secret")),
 			),
 			frontend("jwt-public-key/public-key",
 				passHostHeader(),
-				jwtAuth("", "", "", "", "publicKey","", "", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "", false, "publicKey","", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/public-key", "PathPrefix:/public-key"),
 					route("jwt-public-key", "Host:jwt-public-key")),
 			),
 			frontend("oidc-issuer-uri/issuer-uri",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "", "", "", "", "", "", "", "", ""),
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", false, "", "", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/issuer-uri", "PathPrefix:/issuer-uri"),
 					route("oidc-issuer-uri", "Host:oidc-issuer-uri")),
 			),
 			frontend("oidc-discovery-uri/discovery-uri",
 				passHostHeader(),
-				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration","", "", "", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "", "https://login.microsoftonline.com/fabrikam.onmicrosoft.com/.well-known/openid-configuration", false,"", "", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/discovery-uri", "PathPrefix:/discovery-uri"),
 					route("oidc-discovery-uri", "Host:oidc-discovery-uri")),
 			),
 			frontend("oidc-jwks-uri/jwks-uri",
 				passHostHeader(),
-				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", "", "", "", "", "", "", "", "", "", ""),
+				jwtAuth("", "", "https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys", "", false, "", "", "", "", "", "", "", "", "", ""),
 				routes(
 					route("/jwks-uri", "PathPrefix:/jwks-uri"),
 					route("oidc-jwks-uri", "Host:oidc-jwks-uri")),
 			),
 			frontend("oidc-url-mac-client-secret/url-mac-client-secret",
 				passHostHeader(),
-				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", "", "",
+				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "", "", false, "", "",
 					"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",  "", "myUser:myEncodedPW", "", "", "", "", ""),
 				routes(
 					route("/url-mac-client-secret", "PathPrefix:/url-mac-client-secret"),
@@ -1653,7 +1654,7 @@ rateset:
 			frontend("oidc-url-mac-private-key/url-mac-private-key",
 				passHostHeader(),
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
-					"", "", "",
+					"", false, "", "",
 					"https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
 					"myUser:myEncodedPW", "", "", "", "", "", ""),
 				routes(
@@ -1663,7 +1664,7 @@ rateset:
 			frontend("oidc-validation-regexs/validation-regexs",
 				passHostHeader(),
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
-					"", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
+					"", false, "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
 					"myUser:myEncodedPW", "", ".*test.*", ".*test.*", ".*test.*", ".*test.*", ""),
 				routes(
 					route("/validation-regexs", "PathPrefix:/validation-regexs"),
@@ -1672,7 +1673,7 @@ rateset:
 			frontend("oidc-ignore-path-regexs/ignore-path-regexs",
 				passHostHeader(),
 				jwtAuth("https://login.microsoftonline.com/fabrikam.onmicrosoft.com", "", "",
-					"", "", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
+					"", false,"", "", "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce=defaultNonce&redirect_uri={{.Url}}&scope=openid&response_type=id_token&prompt=login",
 					"myUser:myEncodedPW", "", "", "", "", "", ".*"),
 				routes(
 					route("/ignore-path-regexs", "PathPrefix:/ignore-path-regexs"),
@@ -2854,6 +2855,7 @@ func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
 	path := "/url-mac-client-secret"
 	secretKey := "mySecret"
 	secretValue := "mySecretIsBob"
+	authOidcUseDynamicValidation := true
 	authOidcAlgorithmValidationRegex := "Algorithm"
 	authOidcIgnorePathRegex := "IgnorePath"
 	authOidcAudienceValidationRegex := "Audience"
@@ -2863,6 +2865,7 @@ func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
 	ingresses := []*extensionsv1beta1.Ingress{
 		buildIngress(
 			iNamespace("testing"),
+			iAnnotation(annotationKubernetesAuthOidcUseDynamicValidation, strconv.FormatBool(authOidcUseDynamicValidation)),
 			iAnnotation(annotationKubernetesAuthOidcUrlMacClientSecret, secretKey),
 			iAnnotation(annotationKubernetesAuthOidcAlgorithmValidationRegex, authOidcAlgorithmValidationRegex),
 			iAnnotation(annotationKubernetesAuthOidcAudienceValidationRegex, authOidcAudienceValidationRegex),
@@ -2914,66 +2917,62 @@ func TestOidcUrlMacClientSecretInTemplate(t *testing.T) {
 
 	actual, err := provider.loadIngresses(client)
 	require.NoError(t, err, "error loading ingresses")
-	got := actual.Frontends[host + path].Jwt.UrlMacClientSecret
-	if got != secretValue {
+	if actual.Frontends[host + path].Jwt.UrlMacClientSecret != secretValue {
 		t.Fatalf("unexpected oidc url mac client secret from ingress: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.AlgorithmValidationRegex
-	if got != authOidcAlgorithmValidationRegex {
+	if actual.Frontends[host + path].Jwt.UseDynamicValidation != authOidcUseDynamicValidation {
+		t.Fatalf("unexpected oidc use dynamic from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	if actual.Frontends[host + path].Jwt.AlgorithmValidationRegex != authOidcAlgorithmValidationRegex {
 		t.Fatalf("unexpected oidc algorithm validation regex from ingress: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.AudienceValidationRegex
-	if got != authOidcAudienceValidationRegex {
+	if actual.Frontends[host + path].Jwt.AudienceValidationRegex != authOidcAudienceValidationRegex {
 		t.Fatalf("unexpected oidc audience validation regex from ingress: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.IssuerValidationRegex
-	if got != authOidcIssuerValidationRegex {
+	if actual.Frontends[host + path].Jwt.IssuerValidationRegex != authOidcIssuerValidationRegex {
 		t.Fatalf("unexpected oidc issuer validation regex from ingress: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.SubjectValidationRegex
-	if got != authOidcSubjectValidationRegex {
+	if actual.Frontends[host + path].Jwt.SubjectValidationRegex != authOidcSubjectValidationRegex {
 		t.Fatalf("unexpected oidc subject validation regex from ingress: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.IgnorePathRegex
-	if got != authOidcIgnorePathRegex {
+	if actual.Frontends[host + path].Jwt.IgnorePathRegex != authOidcIgnorePathRegex {
 		t.Fatalf("unexpected oidc ignore path regex from ingress: %+v", actual.Frontends[host + path])
 	}
 
 	actual = provider.loadConfig(*actual)
 
 	require.NotNil(t, actual)
-	got = actual.Frontends[host + path].Jwt.UrlMacClientSecret
-	if got != secretValue {
+	if actual.Frontends[host + path].Jwt.UrlMacClientSecret != secretValue {
 		t.Fatalf("unexpected oidc url mac client secret from loadConfig: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.AlgorithmValidationRegex
-	if got != authOidcAlgorithmValidationRegex {
+	if actual.Frontends[host + path].Jwt.UseDynamicValidation != authOidcUseDynamicValidation {
+		t.Fatalf("unexpected oidc use dynamic from ingress: %+v", actual.Frontends[host + path])
+	}
+
+	if actual.Frontends[host + path].Jwt.AlgorithmValidationRegex != authOidcAlgorithmValidationRegex {
 		t.Fatalf("unexpected oidc algorithm validation regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.AudienceValidationRegex
-	if got != authOidcAudienceValidationRegex {
+	if actual.Frontends[host + path].Jwt.AudienceValidationRegex != authOidcAudienceValidationRegex {
 		t.Fatalf("unexpected oidc audience validation regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.IssuerValidationRegex
-	if got != authOidcIssuerValidationRegex {
+	if actual.Frontends[host + path].Jwt.IssuerValidationRegex != authOidcIssuerValidationRegex {
 		t.Fatalf("unexpected oidc issuer validation regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.SubjectValidationRegex
-	if got != authOidcSubjectValidationRegex {
+	if actual.Frontends[host + path].Jwt.SubjectValidationRegex != authOidcSubjectValidationRegex {
 		t.Fatalf("unexpected oidc subject validation regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 
-	got = actual.Frontends[host + path].Jwt.IgnorePathRegex
-	if got != authOidcIgnorePathRegex {
+	if actual.Frontends[host + path].Jwt.IgnorePathRegex != authOidcIgnorePathRegex {
 		t.Fatalf("unexpected oidc ignore path regex from loadConfig: %+v", actual.Frontends[host + path])
 	}
 }

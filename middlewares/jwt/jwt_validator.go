@@ -122,6 +122,24 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		if err != nil {
 			log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
 		}
+	} else if config.UseDynamicValidation {
+		claims = token.Claims.(jwt.MapClaims)
+
+		var issuer string
+		if claims["iss"] != nil {
+			issuer = claims["iss"].(string)
+		} else {
+			issuer = ""
+		}
+
+		if issuer == "" {
+			log.Infof("Unable to get issuer from JWT so unable to validate kid %s", kid)
+		} else {
+			publicKey, _, err = GetPublicKeyFromIssuerUri(kid, issuer)
+			if err != nil {
+				log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+			}
+		}
 	}
 
 	if err != nil {
@@ -379,13 +397,13 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return clientSecret, nil
 			}
 
-			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "")) {
+			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "" && config.UseDynamicValidation)) {
 				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
 
 			// If kid exists then we using dynamic public keys (oidc)
-			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "") {
+			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "" || config.UseDynamicValidation) {
 				return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, subjectValidationRegex, token)
 			}
 

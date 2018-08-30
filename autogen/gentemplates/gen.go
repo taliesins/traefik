@@ -940,6 +940,7 @@ var _templatesKubernetesTmpl = []byte(`[backends]
       audience = "{{ $frontend.Jwt.Audience }}"
       jwksAddress = "{{ $frontend.Jwt.JwksAddress }}"
       discoveryAddress = "{{ $frontend.Jwt.DiscoveryAddress }}"
+      useDynamicValidation = {{ $frontend.Jwt.UseDynamicValidation }}
       ssoAddressTemplate = "{{ $frontend.Jwt.SsoAddressTemplate }}"
       urlMacClientSecret = "{{ $frontend.Jwt.UrlMacClientSecret }}"
       urlMacPrivateKey = """{{ $frontend.Jwt.UrlMacPrivateKey }}"""
