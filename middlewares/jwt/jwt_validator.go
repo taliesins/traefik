@@ -124,7 +124,7 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 	}
 
 	//public keys are calculated JIT as they are dynamic
-	if config.UseDynamicValidation {
+	if err == nil && config.UseDynamicValidation {
 		claims = token.Claims.(jwt.MapClaims)
 
 		var issuer string
@@ -405,7 +405,7 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 				return clientSecret, nil
 			}
 
-			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "" && config.UseDynamicValidation)) {
+			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "" && !config.UseDynamicValidation)) {
 				//TODO: Validate for ES256,ES384,ES512?
 				return publicKey, nil
 			}
