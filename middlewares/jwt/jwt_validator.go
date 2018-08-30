@@ -106,7 +106,6 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		}
 	}
 
-	//public keys are calculated JIT as they are dynamic
 	if config.JwksAddress != "" {
 		publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
 		if err != nil {
@@ -122,7 +121,10 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		if err != nil {
 			log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
 		}
-	} else if config.UseDynamicValidation {
+	}
+
+	//public keys are calculated JIT as they are dynamic
+	if config.UseDynamicValidation {
 		claims = token.Claims.(jwt.MapClaims)
 
 		var issuer string
@@ -135,9 +137,15 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		if issuer == "" {
 			log.Infof("Unable to get issuer from JWT so unable to validate kid %s", kid)
 		} else {
-			publicKey, _, err = GetPublicKeyFromIssuerUri(kid, issuer)
-			if err != nil {
-				log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+			//Dynamic validation only works if issuer follows well-known convention for OIDC and doesn't have custom hacks
+			//like appending ?p=ProfileName and not including it in the issuer.
+			//So allow the primary to specify this and match on the issuer to decide if it should handle request
+			//Right thing to do is move them into configuration array, lets hope that there is only one issuer per configuration that has this dodgyness
+			if publicKey == nil || issuer != config.Issuer {
+				publicKey, _, err = GetPublicKeyFromIssuerUri(kid, issuer)
+				if err != nil {
+					log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+				}
 			}
 		}
 	}
