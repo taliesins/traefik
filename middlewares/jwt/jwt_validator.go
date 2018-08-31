@@ -124,7 +124,7 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 	}
 
 	//public keys are calculated JIT as they are dynamic
-	if err == nil && config.UseDynamicValidation {
+	if config.UseDynamicValidation {
 		claims = token.Claims.(jwt.MapClaims)
 
 		var issuer string
