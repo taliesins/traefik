@@ -7,28 +7,28 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"crypto/ecdsa"
+	"crypto/rsa"
+	"crypto/tls"
 	"encoding/json"
 	"github.com/containous/traefik/middlewares/tracing"
+	"github.com/containous/traefik/server/uuid"
 	"github.com/containous/traefik/testhelpers"
 	traefiktls "github.com/containous/traefik/tls"
 	"github.com/containous/traefik/types"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/urfave/negroni"
+	"gopkg.in/square/go-jose.v2"
+	"net/url"
 	"os"
 	"path"
-	"runtime"
-	"net/url"
+	"reflect"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
-	"strconv"
-	"github.com/containous/traefik/server/uuid"
-	"crypto/tls"
-	"reflect"
-	"gopkg.in/square/go-jose.v2"
-	"crypto/rsa"
-	"crypto/ecdsa"
 )
 
 const defaultAuthorizationHeaderName = "Authorization"
@@ -165,7 +165,7 @@ func getMiddlewareServer(jwtConfiguration *types.Jwt)(server *httptest.Server, e
 
 type overrideJwtConfiguration func(jwtConfig *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt)
 
-func buildTestServers(publicKeyRootPath string, privateKeyRootPath string, overrideJwtConfiguration overrideJwtConfiguration) (certificate *traefiktls.Certificate, jwksServer *httptest.Server, middlwareServer *httptest.Server, err error) {
+func buildTestJwkServer(publicKeyRootPath string, privateKeyRootPath string, oidcDiscoveryUriPath string, jwksUriPath string) (certificate *traefiktls.Certificate, jwksServer *httptest.Server, err error){
 	if publicKeyRootPath == "" {
 		publicKeyRootPath = "signing/rsa"
 	}
@@ -176,21 +176,18 @@ func buildTestServers(publicKeyRootPath string, privateKeyRootPath string, overr
 
 	certificate, err = getCertificateFromPath(publicKeyRootPath, privateKeyRootPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	jsonWebKeySet, err := getJsonWebset(certificate)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	jsonWebKeySetJson, err := json.Marshal(jsonWebKeySet)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-
-	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
-	jwksUriPath := "/common/discovery/keys"
 
 	//https://login.microsoftonline.com/f51cd401-5085-4669-9352-9e0b88334eb5/discovery/v2.0/keys
 	jwksServer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +201,15 @@ func buildTestServers(publicKeyRootPath string, privateKeyRootPath string, overr
 			panic("Don't know how to handle request")
 		}
 	}))
+
+	return certificate, jwksServer, nil
+}
+
+func buildTestServers(publicKeyRootPath string, privateKeyRootPath string, overrideJwtConfiguration overrideJwtConfiguration) (certificate *traefiktls.Certificate, jwksServer *httptest.Server, middlwareServer *httptest.Server, err error) {
+	oidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	jwksUriPath := "/common/discovery/keys"
+
+	certificate, jwksServer, err = buildTestJwkServer(publicKeyRootPath, privateKeyRootPath, oidcDiscoveryUriPath, jwksUriPath)
 
 	ssoAddressTemplate := "https://login.microsoftonline.com/traefik_k8s_test.onmicrosoft.com/oauth2/v2.0/authorize?p=B2C_1A_signup_signin&client_id=1234f2b2-9fe3-1234-11a6-f123e76e3843&nonce={{.Nonce}}&redirect_uri={{.CallbackUrl}}&state={{.State}}&scope=openid&response_type=id_token&prompt=login"
 	issuerUri, err := url.Parse(jwksServer.URL)
@@ -314,6 +320,8 @@ func buildTestClient(certificate *traefiktls.Certificate, clientSecret string, j
 		overrideClaims(claims, certificate, jwksServer, middlwareServer)
 	} else {
 		claims.Issuer = jwksServer.URL
+		claims.Subject = "sub"
+		claims.Audience = "aud"
 	}
 
 	token := jwt.NewWithClaims(tokenSigningMethod, claims)
@@ -331,11 +339,54 @@ func buildTestClient(certificate *traefiktls.Certificate, clientSecret string, j
 	return client, nonce, issuedAt, signedToken, clientRequestUrl, expectedRedirectorUrl, nil
 }
 
+func runTestAuthenticationWithConfigurationSuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod, configuration func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt), ) {
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.EqualValues(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should be equal")
+}
+
+func runTestAuthenticationWithConfigurationFailure(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod, configuration func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt), ) {
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+}
+
 func runTestWithClientSecretSuccess(t *testing.T, clientSecret string, tokenMethod TokenMethod) {
-	_, jwksServer, middlwareServer, err := buildTestServers("", "", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		jwtConfiguration.ClientSecret=clientSecret
 		return jwtConfiguration
-	})
+	}
+
+	_, jwksServer, middlwareServer, err := buildTestServers("", "", configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -357,10 +408,12 @@ func runTestWithClientSecretSuccess(t *testing.T, clientSecret string, tokenMeth
 }
 
 func runTestWithClientSecretFailure(t *testing.T, serverClientSecret string, clientClientSecret string, tokenMethod TokenMethod) {
-	_, jwksServer, middlwareServer, err := buildTestServers("", "", func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		jwtConfiguration.ClientSecret=serverClientSecret
 		return jwtConfiguration
-	})
+	}
+
+	_, jwksServer, middlwareServer, err := buildTestServers("", "", configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -382,7 +435,7 @@ func runTestWithClientSecretFailure(t *testing.T, serverClientSecret string, cli
 }
 
 func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, tokenMethod TokenMethod) {
-	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		certContent, err := certificate.CertFile.Read()
 		if err != nil {
 			panic(err)
@@ -391,7 +444,9 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		jwtConfiguration.PublicKey=string(certContent)
 
 		return jwtConfiguration
-	})
+	}
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -413,7 +468,7 @@ func runTestWithPublicKeySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 }
 
 func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, publicKeyRootPath string, privateKeyRootPath string, tokenMethod TokenMethod) {
-	certificate, jwksServer, middlwareServer, err := buildTestServers(publicKeyRootPath, privateKeyRootPath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		certContent, err := certificate.CertFile.Read()
 		if err != nil {
 			panic(err)
@@ -422,7 +477,9 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 		jwtConfiguration.PublicKey=string(certContent)
 
 		return jwtConfiguration
-	})
+	}
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(publicKeyRootPath, privateKeyRootPath, configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -444,7 +501,7 @@ func runTestWithPublicKeyFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 }
 
 func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, certificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
-	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		if setIssuer {
 			jwtConfiguration.Issuer = issuerUri.String()
 		}
@@ -456,7 +513,9 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 		}
 
 		return jwtConfiguration
-	})
+	}
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -479,7 +538,7 @@ func runTestWithDiscoverySuccess(t *testing.T, signingMethod jwt.SigningMethod, 
 }
 
 func runTestWithDiscoveryFailure(t *testing.T, signingMethod jwt.SigningMethod, serverCertificatePath string, clientCertificatePath string, setIssuer bool, setOidcDiscoveryUri bool, setJwksUri bool, tokenMethod TokenMethod) {
-	_, jwksServer, middlwareServer, err := buildTestServers(serverCertificatePath, serverCertificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
 		if setIssuer {
 			jwtConfiguration.Issuer = issuerUri.String()
 		}
@@ -491,7 +550,8 @@ func runTestWithDiscoveryFailure(t *testing.T, signingMethod jwt.SigningMethod, 
 		}
 
 		return jwtConfiguration
-	})
+	}
+	_, jwksServer, middlwareServer, err := buildTestServers(serverCertificatePath, serverCertificatePath, configuration)
 	if err != nil {
 		panic(err)
 	}
@@ -1058,31 +1118,147 @@ func TestWithNoAuthenticationAndIgnorePathNotMatched(t *testing.T) {
 	assert.NotEqual(t, url.QueryEscape(""), stateMatch, "state should be specified")
 }
 
-func TestWithValidCredentialsButAlgorithmRegexSuccess(t *testing.T) {
-	signingMethod := jwt.SigningMethodES256
-	certificatePath := "signing/es256"
+func TestWithValidCredentialsAndAlgorithmRegexSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
 	tokenMethod := TokenMethodAuthorizationHeader
 
-	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
-		certContent, err := certificate.CertFile.Read()
-		if err != nil {
-			panic(err)
-		}
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.AlgorithmValidationRegex="RS256"
+		return jwtConfiguration
+	}
 
-		jwtConfiguration.PublicKey=string(certContent)
-		jwtConfiguration.AlgorithmValidationRegex="ES256"
+	runTestAuthenticationWithConfigurationSuccess(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndAlgorithmRegexFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.AlgorithmValidationRegex="NotMatched"
 
 		return jwtConfiguration
-	})
+	}
+
+	runTestAuthenticationWithConfigurationFailure(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndIssuerRegexSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.IssuerValidationRegex="https://.*"
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationSuccess(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndIssuerRegexFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.IssuerValidationRegex="NotMatched"
+
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationFailure(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndAudienceRegexSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.AudienceValidationRegex="aud"
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationSuccess(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndAudienceRegexFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.AudienceValidationRegex="NotMatched"
+
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationFailure(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndSubjectRegexSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.SubjectValidationRegex="sub"
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationSuccess(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndSubjectRegexFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.SubjectValidationRegex="NotMatched"
+
+		return jwtConfiguration
+	}
+
+	runTestAuthenticationWithConfigurationFailure(t, signingMethod, certificatePath, tokenMethod, configuration)
+}
+
+func TestWithValidCredentialsAndDynamicValidationMatchPrimarySuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.UseDynamicValidation = true
+		return jwtConfiguration
+	}
+
+	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
 	defer middlwareServer.Close()
 
+	dynamicCertificatePath := "signing/another.rsa"
+	dynamicOidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	dynamicJwksUriPath := "/common/discovery/keys"
+	_, dynamicJwksServer, err := buildTestJwkServer(dynamicCertificatePath, dynamicCertificatePath, dynamicOidcDiscoveryUriPath, dynamicJwksUriPath)
+	defer dynamicJwksServer.Close()
+
+	//Client is making request with a token that is signed by the primary jwks server
 	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
 
 	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
 	addTokenToRequest(req, tokenMethod, signedToken)
 	res, err := client.Do(req)
 
@@ -1091,37 +1267,128 @@ func TestWithValidCredentialsButAlgorithmRegexSuccess(t *testing.T) {
 
 	body, err := ioutil.ReadAll(res.Body)
 	assert.NoError(t, err, "there should be no error")
-	assert.Regexp(t, `{"RequestUri":"\/.*", "Referer":""}\n`, string(body), "they should be equal")
+	assert.EqualValues(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should be equal")
 }
 
-func TestWithValidCredentialsButAlgorithmRegexFailure(t *testing.T) {
-	signingMethod := jwt.SigningMethodES256
-	certificatePath := "signing/es256"
+func TestWithValidCredentialsAndDynamicValidationMatchDynamicSuccess(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
 	tokenMethod := TokenMethodAuthorizationHeader
 
-	certificate, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
-		certContent, err := certificate.CertFile.Read()
-		if err != nil {
-			panic(err)
-		}
-
-		jwtConfiguration.PublicKey=string(certContent)
-		jwtConfiguration.AlgorithmValidationRegex="NotMatched"
-
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.UseDynamicValidation = true
 		return jwtConfiguration
-	})
+	}
+
+	_, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
 	if err != nil {
 		panic(err)
 	}
 	defer jwksServer.Close()
 	defer middlwareServer.Close()
 
-	client, _, _, signedToken, requestUrl, _, err := buildTestClient(certificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+	dynamicCertificatePath := "signing/another.rsa"
+	dynamicOidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	dynamicJwksUriPath := "/common/discovery/keys"
+	dynamicCertificate, dynamicJwksServer, err := buildTestJwkServer(dynamicCertificatePath, dynamicCertificatePath, dynamicOidcDiscoveryUriPath, dynamicJwksUriPath)
+	defer dynamicJwksServer.Close()
+
+	//Client is making request with a token that is signed by the dynamic jwks server
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(dynamicCertificate, "", dynamicJwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
 
 	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusOK, res.StatusCode, "they should be equal")
+
+	body, err := ioutil.ReadAll(res.Body)
+	assert.NoError(t, err, "there should be no error")
+	assert.EqualValues(t, `{"RequestUri":"/", "Referer":""}` + "\n", string(body), "they should be equal")
+}
+
+func TestWithValidCredentialsAndDynamicValidationMatchPrimaryFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.UseDynamicValidation = true
+		return jwtConfiguration
+	}
+
+	_, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	dynamicCertificatePath := "signing/rsa"
+	dynamicOidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	dynamicJwksUriPath := "/common/discovery/keys"
+	_, dynamicJwksServer, err := buildTestJwkServer(dynamicCertificatePath, dynamicCertificatePath, dynamicOidcDiscoveryUriPath, dynamicJwksUriPath)
+	defer dynamicJwksServer.Close()
+
+	//Client is making request with a token that is signed by a dodgy certificate that will be validated by the primary jwks server
+	dodgyCertificatePath := "signing/another.rsa"
+	dodgyCertificate, err := getCertificateFromPath(dodgyCertificatePath, dodgyCertificatePath)
+	if err != nil {
+		panic(err)
+	}
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(dodgyCertificate, "", jwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
 	addTokenToRequest(req, tokenMethod, signedToken)
 	res, err := client.Do(req)
 
 	assert.NoError(t, err, "there should be no error")
 	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
 }
+
+func TestWithValidCredentialsAndDynamicValidationMatchDynamicFailure(t *testing.T) {
+	signingMethod := jwt.SigningMethodRS256
+	certificatePath := "signing/rsa"
+	tokenMethod := TokenMethodAuthorizationHeader
+
+	configuration := func(jwtConfiguration *types.Jwt, certificate *traefiktls.Certificate, ssoAddressTemplate string, issuerUri *url.URL, oidcDiscoveryUri *url.URL, jwksUri *url.URL) (*types.Jwt){
+		jwtConfiguration.JwksAddress = jwksUri.String()
+		jwtConfiguration.UseDynamicValidation = true
+		return jwtConfiguration
+	}
+
+	_, jwksServer, middlwareServer, err := buildTestServers(certificatePath, certificatePath, configuration)
+	if err != nil {
+		panic(err)
+	}
+	defer jwksServer.Close()
+	defer middlwareServer.Close()
+
+	dynamicCertificatePath := "signing/rsa"
+	dynamicOidcDiscoveryUriPath := "/.well-known/openid-configuration"
+	dynamicJwksUriPath := "/common/discovery/keys"
+	_, dynamicJwksServer, err := buildTestJwkServer(dynamicCertificatePath, dynamicCertificatePath, dynamicOidcDiscoveryUriPath, dynamicJwksUriPath)
+	defer dynamicJwksServer.Close()
+
+	//Client is making request with a token that is signed by a dodgy certificate that will be validated by the dynamic jwks server
+	dodgyCertificatePath := "signing/another.rsa"
+	dodgyCertificate, err := getCertificateFromPath(dodgyCertificatePath, dodgyCertificatePath)
+	if err != nil {
+		panic(err)
+	}
+	client, _, _, signedToken, requestUrl, _, err := buildTestClient(dodgyCertificate, "", dynamicJwksServer, middlwareServer, signingMethod, "", nil, nil, nil)
+
+	req := testhelpers.MustNewRequest(http.MethodGet, requestUrl.String(), nil)
+
+	addTokenToRequest(req, tokenMethod, signedToken)
+	res, err := client.Do(req)
+
+	assert.NoError(t, err, "there should be no error")
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "they should be equal")
+}
+
