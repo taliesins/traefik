@@ -135,7 +135,7 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		}
 
 		if issuer == "" {
-			log.Infof("Unable to get issuer from JWT so unable to validate kid %s", kid)
+			log.Debugf("Unable to get issuer from JWT so unable to validate kid %s", kid)
 		} else {
 			//Dynamic validation only works if issuer follows well-known convention for OIDC and doesn't have custom hacks
 			//like appending ?p=ProfileName and not including it in the issuer.
@@ -144,7 +144,7 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 			if publicKey == nil || issuer != config.Issuer {
 				publicKey, _, err = GetPublicKeyFromIssuerUri(kid, issuer)
 				if err != nil {
-					log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
+					log.Debugf("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
 				}
 			}
 		}
@@ -498,6 +498,8 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		// If there was an error, do not call next.
 		if err == nil && next != nil {
 			next(w, r)
+		} else {
+			log.Debugf("JWT Middleware error: %v", err)
 		}
 	}
 
