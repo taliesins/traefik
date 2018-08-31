@@ -92,7 +92,7 @@ func addTokenToRequest(req *http.Request, tokenMethod TokenMethod, signedToken s
 	switch tokenMethod {
 	case TokenMethodAuthorizationHeader:
 		{
-			req.Header.Set(defaultAuthorizationHeaderName, fmt.Sprintf("bearer %v", signedToken))
+			req.Header.Set(defaultAuthorizationHeaderName, fmt.Sprintf("Bearer %v", signedToken))
 		}
 	case TokenMethodQuerystring:
 		{

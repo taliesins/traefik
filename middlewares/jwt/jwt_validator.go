@@ -270,153 +270,159 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		ignorePathRegex = nil
 	}
 
-	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, errorMessage string) {
-			if ssoRedirectUrlTemplate == nil {
+	errorHandler := func(w http.ResponseWriter, r *http.Request, errorMessage string) {
+		if ssoRedirectUrlTemplate == nil {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, redirectorPath) {
+			//Drop any pre-existing cookie as it should be dead now
+			sessionCookie := getExpiredSessionCookie(r.URL)
+			http.SetCookie(w, sessionCookie)
+
+			//Prevent endless loop if callback address, no one should be calling this directly without an id_token set
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		nonce := uuid.Get()
+		issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+
+		var redirectorUrl *url.URL
+		if urlHashPrivateKey != nil {
+			redirectorUrl, err = getRedirectorUrl(r, urlHashPrivateKey, nonce, issuedAt)
+		} else if urlHashClientSecret != nil {
+			redirectorUrl, err = getRedirectorUrl(r, urlHashClientSecret, nonce, issuedAt)
+		} else {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		if strings.HasPrefix(r.URL.Path, callbackPath) {
+			if strings.HasPrefix(r.Referer(), callbackPath) {
+				//Referrer was from callbackPath, so stop endless loop
 				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
-			if strings.HasPrefix(r.URL.Path, redirectorPath) {
-				//Drop any pre-existing cookie as it should be dead now
-				sessionCookie := getExpiredSessionCookie(r.URL)
-				http.SetCookie(w, sessionCookie)
-
-				//Prevent endless loop if callback address, no one should be calling this directly without an id_token set
-				http.Error(w, "", http.StatusUnauthorized)
-				return
-			}
-
-			nonce := uuid.Get()
-			issuedAt := strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
-
-			var redirectorUrl *url.URL
-			if urlHashPrivateKey != nil {
-				redirectorUrl, err = getRedirectorUrl(r, urlHashPrivateKey, nonce, issuedAt)
-			} else if urlHashClientSecret != nil {
-				redirectorUrl, err = getRedirectorUrl(r, urlHashClientSecret, nonce, issuedAt)
-			} else {
-				http.Error(w, "", http.StatusUnauthorized)
-				return
-			}
+			//callback page for sso
+			ssoCallbackPage, err := renderSsoCallbackPageTemplate(redirectorUrl)
 			if err != nil {
 				http.Error(w, "", http.StatusUnauthorized)
 				return
 			}
 
-			if strings.HasPrefix(r.URL.Path, callbackPath) {
-				if strings.HasPrefix(r.Referer(), callbackPath) {
-					//Referrer was from callbackPath, so stop endless loop
-					http.Error(w, "", http.StatusUnauthorized)
-					return
-				}
-
-				//callback page for sso
-				ssoCallbackPage, err := renderSsoCallbackPageTemplate(redirectorUrl)
-				if err != nil {
-					http.Error(w, "", http.StatusUnauthorized)
-					return
-				}
-
-				//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.WriteHeader(http.StatusUnauthorized)
-				fmt.Fprintln(w, ssoCallbackPage)
-				return
-			}
-
-			ssoRedirectUrl, err := renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate, redirectorUrl, nonce, issuedAt)
-			if err != nil {
-				http.Error(w, "", http.StatusUnauthorized)
-				return
-			}
-
-			//This will allow browsers to default to implicit flow
-			redirectToSsoPage, err := renderRedirectToSsoPageTemplate(ssoRedirectUrl, "")
-			if err != nil {
-				http.Error(w, "", http.StatusUnauthorized)
-				return
-			}
-
+			//The SSO is probably making the callback, but it must have passed id_token as bookmark so we can't access it from server side, so fall back to javascript to set cookie with value
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprintln(w, redirectToSsoPage)
-		},
-		Extractor: func(r *http.Request) (token string, err error) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader != "" {
-				authHeaderParts := strings.Split(authHeader, " ")
-				if len(authHeaderParts) == 2 && strings.ToLower(authHeaderParts[0]) == "bearer" {
-					token = authHeaderParts[1]
-					return token, nil
-				}
-			}
+			fmt.Fprintln(w, ssoCallbackPage)
+			return
+		}
 
-			sessionCookie, err := r.Cookie(sessionCookieName)
+		ssoRedirectUrl, err := renderSsoRedirectUrlTemplate(ssoRedirectUrlTemplate, redirectorUrl, nonce, issuedAt)
+		if err != nil {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		//This will allow browsers to default to implicit flow
+		redirectToSsoPage, err := renderRedirectToSsoPageTemplate(ssoRedirectUrl, "")
+		if err != nil {
+			http.Error(w, "", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintln(w, redirectToSsoPage)
+	}
+
+	extractor := func(r *http.Request) (token string, err error) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			authHeaderParts := strings.Split(authHeader, " ")
+			if len(authHeaderParts) == 2 && strings.ToLower(authHeaderParts[0]) == "bearer" {
+				token = authHeaderParts[1]
+				return token, nil
+			}
+		}
+
+		sessionCookie, err := r.Cookie(sessionCookieName)
+		if err == nil {
+			token = sessionCookie.Value
+			if token != "" {
+				return token, nil
+			}
+		}
+
+		//SSO can post to specific url to set token_id (could also be used for forms authentication?)
+		if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
+			err = r.ParseForm()
 			if err == nil {
-				token = sessionCookie.Value
+				token = r.Form.Get("id_token")
 				if token != "" {
 					return token, nil
 				}
 			}
+		}
 
-			//SSO can post to specific url to set token_id (could also be used for forms authentication?)
-			if r.Method == "POST" && strings.HasPrefix(r.URL.Path, redirectorPath) {
-				err = r.ParseForm()
-				if err == nil {
-					token = r.Form.Get("id_token")
-					if token != "" {
-						return token, nil
-					}
-				}
-			}
+		//For people without javascript
+		query := r.URL.Query()
+		token = query.Get("id_token")
+		if token != "" {
+			return token, nil
+		}
 
-			//For people without javascript
-			query := r.URL.Query()
-			token = query.Get("id_token")
-			if token != "" {
-				return token, nil
-			}
+		return "", nil
+	}
 
-			return "", nil
-		},
-		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
-			algHeader, ok := token.Header["alg"]
-			if !ok {
-				return nil, fmt.Errorf("Cannot get algorithm to use")
-			}
-			alg := algHeader.(string)
+	validationKeyGetter := func(token *jwt.Token) (interface{}, error) {
+		algHeader, ok := token.Header["alg"]
+		if !ok {
+			return nil, fmt.Errorf("Cannot get algorithm to use")
+		}
+		alg := algHeader.(string)
 
-			if algorithmValidationRegex != nil && !algorithmValidationRegex.MatchString(alg) {
-				return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
-			}
-
-			var kid string
-			kidHeader, ok := token.Header["kid"]
-			if ok {
-				kid = kidHeader.(string)
-			} else {
-				kid = ""
-			}
-
-			if clientSecret != nil && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
-				return clientSecret, nil
-			}
-
-			if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "" && !config.UseDynamicValidation)) {
-				//TODO: Validate for ES256,ES384,ES512?
-				return publicKey, nil
-			}
-
-			// If kid exists then we using dynamic public keys (oidc)
-			if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "" || config.UseDynamicValidation) {
-				return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, subjectValidationRegex, token)
-			}
-
+		if algorithmValidationRegex != nil && !algorithmValidationRegex.MatchString(alg) {
 			return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
-		},
+		}
+
+		var kid string
+		kidHeader, ok := token.Header["kid"]
+		if ok {
+			kid = kidHeader.(string)
+		} else {
+			kid = ""
+		}
+
+		if clientSecret != nil && kid == "" && (alg == "HS256" || alg == "HS384" || alg == "HS512") {
+			return clientSecret, nil
+		}
+
+		if publicKey != nil && (kid == "" || (config.Issuer == "" && config.JwksAddress == "" && config.DiscoveryAddress == "" && !config.UseDynamicValidation)) {
+			//TODO: Validate for ES256,ES384,ES512?
+			return publicKey, nil
+		}
+
+		// If kid exists then we using dynamic public keys (oidc)
+		if kid != "" && (config.Issuer != "" || config.JwksAddress != "" || config.DiscoveryAddress != "" || config.UseDynamicValidation) {
+			return oidcValidationKeyGetter(config, kid, issuerValidationRegex, audienceValidationRegex, subjectValidationRegex, token)
+		}
+
+		return nil, fmt.Errorf("Jwt token does not match any allowed algorithm type")
+	}
+
+	jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
+		ErrorHandler: errorHandler,
+		Extractor: extractor,
+		ValidationKeyGetter: validationKeyGetter,
 	})
 
 	jwtHandlerFunc := func(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
@@ -499,7 +505,9 @@ func createJwtHandler(config *types.Jwt) (negroni.HandlerFunc, error) {
 		if err == nil && next != nil {
 			next(w, r)
 		} else {
-			log.Debugf("JWT Middleware error: %v", err)
+			token, _ := extractor(r)
+
+			log.Debugf("JWT Middleware error: url=%s token=%s error=%v", r.URL, token, err)
 		}
 	}
 
