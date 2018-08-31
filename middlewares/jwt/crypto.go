@@ -241,7 +241,7 @@ func GetPublicKeyFromJwks(jwks *jose.JSONWebKeySet, kid string) (interface{}, x5
 		}
 	}
 
-	return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("JsonWebKeySet does not contain key with kid = %s", kid)
+	return nil, x509.UnknownSignatureAlgorithm, fmt.Errorf("JsonWebKeySet does not contain key: kid=%s jwks=%v", kid, jwks)
 }
 
 func GetPublicKeyFromPem(publicKeyPemData []byte) (interface{}, x509.SignatureAlgorithm, error){
