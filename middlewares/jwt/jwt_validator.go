@@ -106,24 +106,6 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 		}
 	}
 
-	if config.JwksAddress != "" {
-		publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
-		if err != nil {
-			log.Infof("Unable to get public key from jwks address %s for kid %s with error %s", config.JwksAddress, kid, err)
-		}
-	} else if config.DiscoveryAddress != "" {
-		publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
-		if err != nil {
-			log.Infof("Unable to get public key from discovery address %s for kid %s with error %s", config.DiscoveryAddress, kid, err)
-		}
-	} else if config.Issuer != "" {
-		publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
-		if err != nil {
-			log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
-		}
-	}
-
-	//public keys are calculated JIT as they are dynamic
 	if config.UseDynamicValidation {
 		claims = token.Claims.(jwt.MapClaims)
 
@@ -141,11 +123,31 @@ func oidcValidationKeyGetter(config *types.Jwt, kid string, issuerValidationRege
 			//like appending ?p=ProfileName and not including it in the issuer.
 			//So allow the primary to specify this and match on the issuer to decide if it should handle request
 			//Right thing to do is move them into configuration array, lets hope that there is only one issuer per configuration that has this dodgyness
-			if publicKey == nil || issuer != config.Issuer {
+
+			if issuer != config.Issuer {
 				publicKey, _, err = GetPublicKeyFromIssuerUri(kid, issuer)
 				if err != nil {
 					log.Debugf("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
 				}
+			}
+		}
+	}
+
+	if err == nil && publicKey == nil {
+		if config.JwksAddress != "" {
+			publicKey, _, err = GetPublicKeyFromJwksUri(kid, config.JwksAddress)
+			if err != nil {
+				log.Infof("Unable to get public key from jwks address %s for kid %s with error %s", config.JwksAddress, kid, err)
+			}
+		} else if config.DiscoveryAddress != "" {
+			publicKey, _, err = GetPublicKeyFromOpenIdConnectDiscoveryUri(kid, config.DiscoveryAddress)
+			if err != nil {
+				log.Infof("Unable to get public key from discovery address %s for kid %s with error %s", config.DiscoveryAddress, kid, err)
+			}
+		} else if config.Issuer != "" {
+			publicKey, _, err = GetPublicKeyFromIssuerUri(kid, config.Issuer)
+			if err != nil {
+				log.Infof("Unable to get public key from issuer %s for kid %s with error %s", config.Issuer, kid, err)
 			}
 		}
 	}
